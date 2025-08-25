@@ -3,18 +3,22 @@
 
 import { useEffect, useState } from 'react'; 
 import dynamic from 'next/dynamic'; 
-import { FireRiskData } from '../../types'; 
-import { mockFireRiskData } from '../../mockData';
+import { FireRiskData } from '../types'; 
+import { mockFireRiskData } from '../lib/mockData';
 
-// Leaflet requires 'window' object which only exists in browsers, not during server-side rendering
-// Dynamic import with ssr: false ensures this component only loads on the client side
-const MapContainer = dynamic(() => import('react-leaflet').then(mod => ({default: mod.MapContainer})), {ssr: false});
+const LeafletMap = dynamic(
+  () => import('./LeafletMap'),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center bg-gray-100 rounded-lg h-full">
+        <p className="text-gray-600">Loading Map...</p>
+      </div>
+    )
+  }
+);
 
-const TileLayer = dynamic(() => import('react-leaflet').then(mod => ({default: mod.TileLayer})), {ssr: false});
 
-const CircleMarker = dynamic(() => import('react-leaflet').then(mod => ({default: mod.CircleMarker})), {ssr: false});
-
-const Popup = dynamic(() => import('react-leaflet').then(mod => ({default: mod.Popup})), {ssr: false});
 
 //Define the shape of data this component expects to receive as props
 interface MapProps {
@@ -23,30 +27,22 @@ interface MapProps {
   className?: string;
 }
 
-const getRiskColor = (riskLevel: number): string => {
-  if (riskLevel >= 0.8) return '#d32f2f';
-  if (riskLevel >= 0.6) return '#f57c00'; 
-  if (riskLevel >= 0.4) return '#fbc02d'; 
-  if (riskLevel >= 0.2) return '#689f38'; 
-  return '#388e3c'; 
-};
-
 const Map: React.FC<MapProps> = ({
   data = mockFireRiskData,
-  height = '500px',
+  height = '700px',
   className = ''
 }) => {
   //useState manages component state, triggers re-render when state changes
-  const [isClient, setIsClient] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setIsClient(true); //Set to true once component mounts on client side
+    setMounted(true); //Set to true once component mounts on client side
   }, []);
 
   //Handle loading states or conditions before rendering main content
-  if (!isClient) {
+  if (!mounted) {
     return (
-      <div className="flex items-center justify-center bg-gray-100 rounded-lg"
+      <div className={`flex items-center justify-center bg-gray-100 rounded-lg ${className}`}
       style={{height: height}} //Inline style using height prop
       >
         <p className="text-gray-600">
@@ -55,12 +51,12 @@ const Map: React.FC<MapProps> = ({
       </div>
     );
   }
+
   return (
-    //Template literal allows dynamic class combination
     <div className={`relative rounded-lg overflow-hidden shadow-lg ${className}`}>
-
-      
+      <LeafletMap data={data} height={height} />
     </div>
-
-
-  )
+  );
+};
+  
+export default Map;
