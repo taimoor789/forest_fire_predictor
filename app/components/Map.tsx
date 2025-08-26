@@ -18,8 +18,6 @@ const LeafletMap = dynamic(
   }
 );
 
-
-
 //Define the shape of data this component expects to receive as props
 interface MapProps {
   data?: FireRiskData[];

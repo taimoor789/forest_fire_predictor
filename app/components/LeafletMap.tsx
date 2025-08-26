@@ -16,31 +16,36 @@ const getRiskColor = (riskLevel: number): string => {
 };
 
 const LeafletMap: React.FC<LeafletMapProps> = ({ data, height }) => {
+  //Ref for the map container DOM element
   const mapRef = useRef<HTMLDivElement>(null);
+  //Ref to store Leaflet map instance (persists across re-renders)
   const mapInstanceRef = useRef<LeafletMapType | null>(null);
 
   useEffect(() => {
-    // Only run on client side
+    //Skip execution during server-side rendering
     if (typeof window === 'undefined') return;
 
-    // Import Leaflet dynamically
+    //Dynamic import function to load Leaflet only on client
     const initializeMap = async () => {
       const L = await import('leaflet');
       
-      // Fix for default markers in Next.js
+       //Fix for Next.js: Remove internal icon URL method that causes SSR issues
       const DefaultIcon = L.Icon.Default.prototype as {
         _getIconUrl?: () => string;
       };
       delete DefaultIcon._getIconUrl;
       
+      //Explicitly set marker icon URLs to prevent broken images in production
       L.Icon.Default.mergeOptions({
         iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
         iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
         shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
       });
 
+      //Only initialize map if container exists and no map instance exists (prevents re-creation)
       if (mapRef.current && !mapInstanceRef.current) {
-        // Canada's approximate bounds
+
+        //Canada's approximate bounds
         const canadaBounds: [[number, number], [number, number]] = [
           [41.6765559, -141.00187], // Southwest corner
           [83.23324, -52.6480987]   // Northeast corner
@@ -48,15 +53,15 @@ const LeafletMap: React.FC<LeafletMapProps> = ({ data, height }) => {
 
         // Initialize the map
         const map = L.map(mapRef.current, {
-          center: [56.1304, -106.3468], // Center of Canada
+          center: [56.1304, -106.3468], //Center of Canada
           zoom: 4,
-          minZoom: 3,
-          maxZoom: 10,
+          minZoom: 3, //Prevent zooming out too far
+          maxZoom: 12,  //Prevent zooming in too close
           maxBounds: canadaBounds,
-          maxBoundsViscosity: 1.0, // Prevents panning outside bounds
+          maxBoundsViscosity: 1.0, //Prevents panning outside bounds
           zoomControl: true,
           scrollWheelZoom: true,
-          preferCanvas: true
+          preferCanvas: true //Better performance with many markers
         });
 
         // Add tile layer
@@ -65,13 +70,13 @@ const LeafletMap: React.FC<LeafletMapProps> = ({ data, height }) => {
           maxZoom: 18
         }).addTo(map);
 
-        // Add markers
+        //Iterate through each location data point to create map markers
         data.forEach((location) => {
           const circle = L.circleMarker([location.lat, location.lng], {
             radius: 15,
             fillColor: getRiskColor(location.riskLevel),
-            color: '#ffffff',
-            weight: 2,
+            color: '#ffffff', //White border
+            weight: 2,      //Border thickness
             opacity: 1.0,
             fillOpacity: 0.8
           }).addTo(map);
@@ -105,21 +110,24 @@ const LeafletMap: React.FC<LeafletMapProps> = ({ data, height }) => {
             </div>
           `;
 
+          //Bind the popup content to the circle marker
           circle.bindPopup(popupContent);
         });
 
+        //Store the map instance in ref to prevent re-initialization on re-renders
         mapInstanceRef.current = map;
 
-        // Fit bounds to show all markers, but respect Canada bounds
         if (data.length > 0) {
+          //Create a feature group containing all marker positions for bounds calculation
           const group = L.featureGroup(
             data.map(location => 
               L.circleMarker([location.lat, location.lng])
             )
           );
+            //Get the geographical bounds that contain all markers with 10% padding
           const bounds = group.getBounds().pad(0.1);
           
-          // Ensure bounds don't exceed Canada
+          //Ensure bounds don't exceed Canada
           const constrainedBounds = L.latLngBounds(
             [
               Math.max(bounds.getSouth(), canadaBounds[0][0]),
@@ -131,9 +139,10 @@ const LeafletMap: React.FC<LeafletMapProps> = ({ data, height }) => {
             ]
           );
           
+            //Zoom and pan map to show all markers within constrained Canadian bounds
           map.fitBounds(constrainedBounds);
         } else {
-          // If no data, fit to Canada bounds
+            //If no data, default to showing all of Canada
           map.fitBounds(canadaBounds);
         }
       }
@@ -141,18 +150,18 @@ const LeafletMap: React.FC<LeafletMapProps> = ({ data, height }) => {
 
     initializeMap();
 
-    // Cleanup function
+    //Cleanup function: runs when component unmounts or data changes
     return () => {
       if (mapInstanceRef.current) {
-        mapInstanceRef.current.remove();
-        mapInstanceRef.current = null;
+        mapInstanceRef.current.remove(); //Properly destroy Leaflet map to prevent memory leaks
+        mapInstanceRef.current = null; //Clear reference to allow re-initialization
       }
     };
-  }, [data]);
+  }, [data]); //effect re-runs only when data changes
 
   return (
     <>
-      {/* Import Leaflet CSS */}
+      {/* Dynamically load Leaflet CSS for map styling (avoids SSR issues) */}
       <link
         rel="stylesheet"
         href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css"
@@ -161,12 +170,13 @@ const LeafletMap: React.FC<LeafletMapProps> = ({ data, height }) => {
       />
       
       <div style={{ position: 'relative', height }}>
+         {/* Map container div - Leaflet will render into this element */}
         <div
           ref={mapRef}
           style={{ height: '100%', width: '100%' }}
         />
         
-        {/* Legend */}
+        {/* Legend overlay positioned absolutely over the map */}
         <div style={{
           position: 'absolute',
           top: '16px',
@@ -175,7 +185,7 @@ const LeafletMap: React.FC<LeafletMapProps> = ({ data, height }) => {
           padding: '12px',
           borderRadius: '6px',
           boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
-          zIndex: 1000
+          zIndex: 1000 //Ensure legend appears above map elements
         }}>
           <h4 style={{
             fontSize: '14px',
@@ -208,6 +218,7 @@ const LeafletMap: React.FC<LeafletMapProps> = ({ data, height }) => {
                   marginRight: '8px'
                 }}
               />
+                {/* Legend text with risk level name and minimum percentage */}
               <span style={{ fontSize: '12px' }}>
                 {item.level} ({item.min}%+)
               </span>
