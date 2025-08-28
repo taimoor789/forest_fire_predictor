@@ -4,20 +4,59 @@ export interface FireRiskData {
   id: string;
   lat: number;
   lng: number;
-  riskLevel: number;
+  riskLevel: number; 
   location: string;
   province: string;
   lastUpdated: string;
-}
-
-export interface ExtendedFireRiskData extends FireRiskData {
   temperature?: number;
   humidity?: number;
   windSpeed?: number;
-  precipitation?: number;
   pressure?: number;
-  fireWeatherIndex?: number;
+  fireDangerIndex?: number;
+  modelConfidence?: number;
+  weatherFeatures?: {
+    temp_range?: number;
+    is_hot?: boolean;
+    is_dry?: boolean;
+    is_windy?: boolean;
+    has_recent_precip?: boolean;
+    total_precip?: number;
+  };
 }
+
+//ML Model specific interfaces
+export interface MLModelInfo {
+  accuracy: number;
+  roc_auc: number;
+  version: string;
+  features: string[];
+  lastTrained: string;
+  totalLocations: number;
+}
+
+export interface MLPredictionData {
+  lat: number;
+  lon: number;
+  location_name: string;
+  province: string;
+  fire_risk_probability: number;
+  weather_features: {
+    temperature: number;
+    humidity: number;
+    wind_speed: number;
+    pressure: number;
+    fire_danger_index: number;
+    temp_range: number;
+    is_hot: number;
+    is_dry: number;
+    is_windy: number;
+    has_recent_precip: number;
+    total_precip: number;
+  };
+  model_confidence: number;
+  last_updated: string;
+}
+
 
 //Defines color schemes for different risk levels
 export interface RiskColor {
@@ -37,7 +76,7 @@ export interface MapProps {
   className?: string;
   center?: [number, number];
   zoom?: number;
-  onLocaationClick?: (location: FireRiskData) => void;
+  onLocationClick?: (location: FireRiskData) => void;
 }
 
 //Legend Component Props
@@ -75,13 +114,17 @@ export interface FireRiskResponse {
   dataSource?: string;      
 }
 
+//Statistics for the sidebar
 export interface StatisticsData {
   highRiskCount: number;
   mediumRiskCount: number;
   lowRiskCount: number;
   totalLocations: number;
   modelAccuracy: number;
+  modelRocAuc: number;
+  averageConfidence: number;
   lastUpdated: string;
+  modelVersion: string;
 }
 
 //Alert/Warning Interface (for recent alerts sidebar)
@@ -96,7 +139,6 @@ export interface FireAlert {
 }
 
 //Utility Types
-
 export type BasicFireRiskData = Pick<FireRiskData, 'id' | 'lat' | 'lng' | 'riskLevel'>;
 
 export type PartialFireRiskData = Partial<FireRiskData>;
@@ -110,13 +152,38 @@ export type CanadianProvince =
   | 'YT' | 'NT' | 'NU'; // Territories
 
   //Constants
-  export const RISK_LEVELS = {
-    VERY_LOW: 0.0,
-    LOW: 0.2,
-    MEDIUM: 0.4,
-    HIGH: 0.6,
-    VERY_HIGH: 0.8,
-  } as const; //makes this readonly
+  export const ML_RISK_THRESHOLDS = {
+  VERY_HIGH: 0.8,  
+  HIGH: 0.6,       
+  MEDIUM: 0.4,     
+  LOW: 0.2,        
+  VERY_LOW: 0.0    
+} as const; //makes this readonly
+
+//Helper function to get risk category from ML probability
+export function getRiskCategory(probability: number): keyof typeof ML_RISK_THRESHOLDS {
+  if (probability >= ML_RISK_THRESHOLDS.VERY_HIGH) return 'VERY_HIGH';
+  if (probability >= ML_RISK_THRESHOLDS.HIGH) return 'HIGH';
+  if (probability >= ML_RISK_THRESHOLDS.MEDIUM) return 'MEDIUM';
+  if (probability >= ML_RISK_THRESHOLDS.LOW) return 'LOW';
+  return 'VERY_LOW';
+}
+
+//Helper function to get risk label
+export function getRiskLabel(probability: number): string {
+  const category = getRiskCategory(probability);
+  const percentage = Math.round(probability * 100);
+  
+  const labels = {
+    VERY_HIGH: `Very High (${percentage}%)`,
+    HIGH: `High (${percentage}%)`,
+    MEDIUM: `Medium (${percentage}%)`,
+    LOW: `Low (${percentage}%)`,
+    VERY_LOW: `Very Low (${percentage}%)`
+  };
+  
+  return labels[category];
+}
 
   // Default color scheme
 export const DEFAULT_RISK_COLORS: RiskColor[] = [
@@ -127,19 +194,18 @@ export const DEFAULT_RISK_COLORS: RiskColor[] = [
   { min: 0.0, max: 0.2, color: '#388e3c', label: 'Very Low', textColor: '#ffffff' },
 ];
 
-//These functions check if data matches expected types at runtime
-export function isValidFireRiskData(obj: unknown): obj is FireRiskData {
+//Validation function for ML predictions, check if types match at runtime
+export function isValidMLPrediction(obj: unknown): obj is MLPredictionData {
   return (
     typeof obj === 'object' &&
     obj !== null &&
-    typeof (obj as FireRiskData).id === 'string' &&
-    typeof (obj as FireRiskData).lat === 'number' &&
-    typeof (obj as FireRiskData).lng === 'number' &&
-    typeof (obj as FireRiskData).riskLevel === 'number' &&
-    (obj as FireRiskData).riskLevel >= 0 && (obj as FireRiskData).riskLevel <= 1 &&
-    typeof (obj as FireRiskData).location === 'string' &&
-    typeof (obj as FireRiskData).province === 'string' &&
-    typeof (obj as FireRiskData).lastUpdated === 'string'
+    typeof (obj as MLPredictionData).lat === 'number' &&
+    typeof (obj as MLPredictionData).lon === 'number' &&
+    typeof (obj as MLPredictionData).fire_risk_probability === 'number' &&
+    (obj as MLPredictionData).fire_risk_probability >= 0 &&
+    (obj as MLPredictionData).fire_risk_probability <= 1 &&
+    typeof (obj as MLPredictionData).location_name === 'string' &&
+    typeof (obj as MLPredictionData).province === 'string'
   );
 }
 
