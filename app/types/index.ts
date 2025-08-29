@@ -145,12 +145,6 @@ export type PartialFireRiskData = Partial<FireRiskData>;
 
 export type RiskLevel = 'very-low' | 'low' | 'medium' | 'high' | 'very-high';
 
-export type CanadianProvince = 
-  | 'BC' | 'AB' | 'SK' | 'MB' // Western provinces
-  | 'ON' | 'QC'      // Central provinces  
-  | 'NB' | 'NS' | 'PE' | 'NL' // Atlantic provinces
-  | 'YT' | 'NT' | 'NU'; // Territories
-
   //Constants
   export const ML_RISK_THRESHOLDS = {
   VERY_HIGH: 0.8,  
@@ -204,8 +198,7 @@ export function isValidMLPrediction(obj: unknown): obj is MLPredictionData {
     typeof (obj as MLPredictionData).fire_risk_probability === 'number' &&
     (obj as MLPredictionData).fire_risk_probability >= 0 &&
     (obj as MLPredictionData).fire_risk_probability <= 1 &&
-    typeof (obj as MLPredictionData).location_name === 'string' &&
-    typeof (obj as MLPredictionData).province === 'string'
+    typeof (obj as MLPredictionData).location_name === 'string' 
   );
 }
 

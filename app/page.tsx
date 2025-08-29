@@ -1,8 +1,9 @@
 import Map from './components/Map';
-import { FireRiskData } from './types';
+import { useFireRiskData } from './lib/api';
 
 //Server Component by default - run on the server, faster, and better for SEO, 'use client' only for interactivity
 export default function Home() {
+  const {data} = useFireRiskData();
   return (
     //header → main content → footer structure
     <main className="min-h-screen bg-gray-50">
@@ -58,6 +59,7 @@ export default function Home() {
               <Map 
                 height="700px" 
                 className="border border-gray-200"
+                data={data}
               />
             </div>
           </div>
