@@ -3,11 +3,12 @@
 export interface FireRiskData {
   id: string;
   lat: number;
-  lng: number;
+  lon: number;
   riskLevel: number; 
   location: string;
   province: string;
   lastUpdated: string;
+  nearest_station?: string;
   temperature?: number;
   humidity?: number;
   windSpeed?: number;
@@ -57,6 +58,24 @@ export interface MLPredictionData {
   last_updated: string;
 }
 
+export interface StationData {
+  stationName: string;
+  coordinates: [number, number];
+  province: string;
+  gridCells: FireRiskData[];
+  avgRisk: number;
+  maxRisk: number;
+  minRisk: number;
+  highRiskCount: number;
+  mediumRiskCount: number;
+  lowRiskCount: number;
+  weather?: {
+    temperature?: number;
+    humidity?: number;
+    windSpeed?: number;
+    pressure?: number;
+  };
+}
 
 //Defines color schemes for different risk levels
 export interface RiskColor {
@@ -139,7 +158,7 @@ export interface FireAlert {
 }
 
 //Utility Types
-export type BasicFireRiskData = Pick<FireRiskData, 'id' | 'lat' | 'lng' | 'riskLevel'>;
+export type BasicFireRiskData = Pick<FireRiskData, 'id' | 'lat' | 'lon' | 'riskLevel'>;
 
 export type PartialFireRiskData = Partial<FireRiskData>;
 
@@ -161,6 +180,14 @@ export function getRiskCategory(probability: number): keyof typeof ML_RISK_THRES
   if (probability >= ML_RISK_THRESHOLDS.MEDIUM) return 'MEDIUM';
   if (probability >= ML_RISK_THRESHOLDS.LOW) return 'LOW';
   return 'VERY_LOW';
+}
+
+export interface HeatLayerOptions {
+  radius?: number;
+  blur?: number;
+  max?: number;
+  maxZoom?: number;
+  gradient?: { [key: number]: string };
 }
 
 //Helper function to get risk label
@@ -202,10 +229,10 @@ export function isValidMLPrediction(obj: unknown): obj is MLPredictionData {
   );
 }
 
-export function isValidCoordinate(lat: number, lng: number): boolean {
+export function isValidCoordinate(lat: number, lon: number): boolean {
   return (
     lat >= -90 && lat <= 90 &&      // Valid latitude range
-    lng >= -180 && lng <= 180       // Valid longitude range
+    lon >= -180 && lon <= 180       // Valid longitude range
   );
 }
 

@@ -119,7 +119,7 @@ export class FireRiskAPI {
     return response.data.map(item => ({
       id: `${item.lat}_${item.lon}`,
       lat: item.lat,
-      lng: item.lon,
+      lon: item.lon,
       riskLevel: item.fire_risk_probability, 
       location: item.location_name,
       province: item.province,
@@ -142,7 +142,7 @@ export class FireRiskAPI {
     lastTrained: string;
   }> {
     const response = await this.fetchWithErrorHandling<{
-       accuracy: number;
+      accuracy: number;
       roc_auc: number;
       features: string[];
       version: string;
@@ -205,8 +205,31 @@ export function useFireRiskData() {
         FireRiskAPI.getModelInfo().catch(() => null) //Don't fail if model info unavailable
       ]);
 
+
+      //Validate data structure before setting
+      const validatedData = fireRiskData.filter(item => {
+
+        const isValid = 
+          typeof item.lat === 'number' && 
+          typeof item.lon === 'number' &&
+          typeof item.riskLevel === 'number' &&
+          item.riskLevel >= 0 && 
+          item.riskLevel <= 1 &&
+          typeof item.location === 'string' &&
+          item.location.trim() !== '';
+
+          if (!isValid) {
+            console.warn("Invalid data item", item);
+          }
+          return isValid;
+      });
+
+      if (validatedData.length === 0 && fireRiskData.length > 0) {
+        throw new Error('No valid prediction data received from API');
+      }
+
       //Update states with new data
-      setData(fireRiskData);
+      setData(validatedData);
       setModelInfo(modelData);
       setLastUpdated(new Date().toISOString());
 
@@ -218,11 +241,16 @@ export function useFireRiskData() {
       console.error('Failed to fetch ML predictions:', err);
       //If it's an ApiError, use its message, otherwise generic fallback
       setError(err instanceof ApiError ? err.message : 'Failed to load ML predictions');
-
-       //Fall back to mock data on error
-       const {mockFireRiskData } = await import('./mockData');
-       setData(mockFireRiskData);
-       console.log('Using mock data as fallback');
+      
+      //Fall back to mock data on error
+      try {
+        const {mockFireRiskData } = await import('./mockData');
+        setData(mockFireRiskData);
+        console.log('Using mock data as fallback');
+      } catch (mockError) {
+        console.error('Failed to load mock data:', mockError);
+        setData([]);
+      }
     } finally {
       setLoading(false);
     }
@@ -231,9 +259,22 @@ export function useFireRiskData() {
   useEffect(() => {
     fetchData();
 
-    //Set up auto-refresh every 15 minutes for fresh predictions
-    const interval = setInterval(fetchData, 15 * 60 * 1000);
-    return () => clearInterval(interval); //cleanup on unmount
+     //Calculate time until 8:30 AM the next day
+     const now = new Date();
+     const tomorrow830 = new Date();
+     tomorrow830.setDate(now.getDate() + 1);
+     tomorrow830.setHours(8, 30, 0, 0);
+
+     const timeUntil830 = tomorrow830.getTime() - now.getTime();
+
+     //Set timeout for 8:30 AM, then daily interval
+     const initialTimeout = setTimeout(() => {
+      fetchData();
+      const dailyInterval = setInterval(fetchData, 24 * 60 * 60 * 1000);
+      return () => clearInterval(dailyInterval);
+     }, timeUntil830);
+
+     return () => clearTimeout(initialTimeout);
   }, []);
 
   return {

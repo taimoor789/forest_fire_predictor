@@ -5,7 +5,7 @@ export const mockFireRiskData: FireRiskData[] = [
   { 
     id: '1', 
     lat: 49.2827, 
-    lng: -123.1207, 
+    lon: -123.1207, 
     riskLevel: 0.75, 
     location: 'Vancouver', 
     province: 'BC', 
@@ -14,7 +14,7 @@ export const mockFireRiskData: FireRiskData[] = [
   { 
     id: '2', 
     lat: 53.9171, 
-    lng: -122.7497, 
+    lon: -122.7497, 
     riskLevel: 0.85, 
     location: 'Prince George', 
     province: 'BC', 
@@ -25,7 +25,7 @@ export const mockFireRiskData: FireRiskData[] = [
   { 
     id: '3', 
     lat: 51.0447, 
-    lng: -114.0719, 
+    lon: -114.0719, 
     riskLevel: 0.45, 
     location: 'Calgary', 
     province: 'AB', 
@@ -34,7 +34,7 @@ export const mockFireRiskData: FireRiskData[] = [
   { 
     id: '4', 
     lat: 53.5444, 
-    lng: -113.4909, 
+    lon: -113.4909, 
     riskLevel: 0.40, 
     location: 'Edmonton', 
     province: 'AB', 
@@ -45,7 +45,7 @@ export const mockFireRiskData: FireRiskData[] = [
   { 
     id: '5', 
     lat: 52.1579, 
-    lng: -106.6702, 
+    lon: -106.6702, 
     riskLevel: 0.55, 
     location: 'Saskatoon', 
     province: 'SK', 
@@ -56,7 +56,7 @@ export const mockFireRiskData: FireRiskData[] = [
   { 
     id: '6', 
     lat: 49.8951, 
-    lng: -97.1384, 
+    lon: -97.1384, 
     riskLevel: 0.35, 
     location: 'Winnipeg', 
     province: 'MB', 
@@ -67,7 +67,7 @@ export const mockFireRiskData: FireRiskData[] = [
   { 
     id: '7', 
     lat: 43.6532, 
-    lng: -79.3832, 
+    lon: -79.3832, 
     riskLevel: 0.25, 
     location: 'Toronto', 
     province: 'ON', 
@@ -76,7 +76,7 @@ export const mockFireRiskData: FireRiskData[] = [
   { 
     id: '8', 
     lat: 45.4215, 
-    lng: -75.6972, 
+    lon: -75.6972, 
     riskLevel: 0.30, 
     location: 'Ottawa', 
     province: 'ON', 
@@ -87,7 +87,7 @@ export const mockFireRiskData: FireRiskData[] = [
   { 
     id: '9', 
     lat: 45.5017, 
-    lng: -73.5673, 
+    lon: -73.5673, 
     riskLevel: 0.20, 
     location: 'Montreal', 
     province: 'QC', 
@@ -98,7 +98,7 @@ export const mockFireRiskData: FireRiskData[] = [
   { 
     id: '10', 
     lat: 44.6488, 
-    lng: -63.5752, 
+    lon: -63.5752, 
     riskLevel: 0.15, 
     location: 'Halifax', 
     province: 'NS', 
