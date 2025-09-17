@@ -32,7 +32,6 @@ export interface MLPredictionRequest {
   };
 }
 
-//Defines the expected structure of the ML model's response
 export interface MLPredictionResponse {
   success: boolean;
   data: Array<{
@@ -40,8 +39,8 @@ export interface MLPredictionResponse {
     lon: number;
     location_name: string;
     province: string;
-    fire_risk_probability: number; 
-    weather_features: { //Weather features used by the model
+    daily_fire_risk: number; 
+    weather_features: {
       temperature: number;
       humidity: number;
       wind_speed: number;
@@ -58,17 +57,20 @@ export interface MLPredictionResponse {
       total_precip: number;
       has_recent_precip: number;
       weather_main_encoded: number;
+    };
+    model_confidence: number;
+    last_updated: string;
+  }>;
+  model_info: {
+    model_type: string;
+    version: string;
+    r2_score: number; 
+    mse: number;
+    mae: number;
+    risk_range: [number, number];
+    features_used: string[];
   };
-  model_confidence: number;
-  last_updated: string;
-}>;
-model_info: {
-  version: string;
-  accuracy: number;
-  roc_auc: number;
-  features_used: string[];
-};
-timestamp: string;
+  timestamp: string;
 }
 
 //API service class
@@ -120,7 +122,7 @@ export class FireRiskAPI {
       id: `${item.lat}_${item.lon}`,
       lat: item.lat,
       lon: item.lon,
-      riskLevel: item.fire_risk_probability, 
+      riskLevel: item.daily_fire_risk, // Updated field name
       location: item.location_name,
       province: item.province,
       lastUpdated: item.last_updated,
@@ -135,28 +137,38 @@ export class FireRiskAPI {
 
     //Gets model metadata + performance metrics and normalizes naming for the UI
   static async getModelInfo(): Promise<{
-    accuracy: number;
-    roc_auc: number;
+    modelType: string;
+    r2Score: number;
+    mse: number;
+    mae: number;
+    riskRange: [number, number];
     features: string[];
     version: string;
     lastTrained: string;
   }> {
     const response = await this.fetchWithErrorHandling<{
-      accuracy: number;
-      roc_auc: number;
+      model_type: string;
+      r2_score: number;
+      mse: number;
+      mae: number;
+      risk_range: [number, number];
       features: string[];
       version: string;
-      last_trained: string; //server uses snake_case
+      last_trained: string;
     }>('/api/model/info');
 
     return {
-      accuracy: response.accuracy,
-      roc_auc: response.roc_auc,
+      modelType: response.model_type,
+      r2Score: response.r2_score,
+      mse: response.mse,
+      mae: response.mae,
+      riskRange: response.risk_range,
       features: response.features,
       version: response.version,
-      lastTrained: response.last_trained //snake_case -> camelCase
+      lastTrained: response.last_trained
     };
   }
+
   //Trigger model retraining (if needed)
   static async retrain(): Promise<{success: boolean; message: string}> {
     return this.fetchWithErrorHandling('/api/model/retrain', {
@@ -189,8 +201,11 @@ export function useFireRiskData() {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [modelInfo, setModelInfo] = useState<{
-    accuracy: number;
-    roc_auc: number;
+    modelType: string;
+    r2Score: number;
+    mse: number;
+    mae: number;
+    riskRange: [number, number];
     version: string;
   } | null>(null);
 
@@ -201,14 +216,13 @@ export function useFireRiskData() {
       setError(null);  //clear previous errors
 
       //Fetch both predictions and model info
-      const [fireRiskData, modelData] = await Promise.all([FireRiskAPI.getFireRiskPredictions(),
+      const [fireRiskData, modelData] = await Promise.all([
+        FireRiskAPI.getFireRiskPredictions(),
         FireRiskAPI.getModelInfo().catch(() => null) //Don't fail if model info unavailable
       ]);
 
-
       //Validate data structure before setting
       const validatedData = fireRiskData.filter(item => {
-
         const isValid = 
           typeof item.lat === 'number' && 
           typeof item.lon === 'number' &&
@@ -228,14 +242,14 @@ export function useFireRiskData() {
         throw new Error('No valid prediction data received from API');
       }
 
-      //Update states with new data
       setData(validatedData);
       setModelInfo(modelData);
       setLastUpdated(new Date().toISOString());
 
-      console.log(`Loaded ${fireRiskData.length} predictions from ML model`);
+      console.log(`Loaded ${validatedData.length} daily fire risk predictions`);
       if (modelData) {
-        console.log(`Model accuracy: ${(modelData.accuracy * 100).toFixed(1)}%, ROC-AUC: ${modelData.roc_auc.toFixed(3)}`);
+        console.log(`Model R²: ${(modelData.r2Score * 100).toFixed(1)}%, MAE: ${modelData.mae.toFixed(3)}`);
+        console.log(`Risk range: ${modelData.riskRange[0].toFixed(3)} - ${modelData.riskRange[1].toFixed(3)}`);
       }
     } catch (err) {
       console.error('Failed to fetch ML predictions:', err);
