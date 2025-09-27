@@ -1,4 +1,4 @@
-import { FireRiskData, FireRiskResponse, ApiError as ApiErrorInterface} from "../types";
+import { FireRiskData, ApiError as ApiErrorInterface} from "../types";
 import { useState, useEffect } from "react";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -115,25 +115,37 @@ export class FireRiskAPI {
   }
 
   static async getFireRiskPredictions(): Promise<FireRiskData[]> {
-    const response = await this.fetchWithErrorHandling<MLPredictionResponse>('/api/predict/fire-risk');
+  const response = await this.fetchWithErrorHandling<MLPredictionResponse>('/api/predict/fire-risk');
+  
+  // Log the actual response structure
+  console.log('🔍 RAW API RESPONSE:', response);
+  console.log('🔍 Response data length:', response.data?.length);
+  console.log('🔍 First data item:', response.data?.[0]);
 
-    //Transform ML response to match frontend FireRiskData interface
-    return response.data.map(item => ({
+  //Transform ML response to match frontend FireRiskData interface
+  return response.data.map((item, index) => {
+    if (index < 3) {
+      console.log(`🔍 Transforming item ${index}:`, item);
+      console.log(`   -> riskLevel: ${item.daily_fire_risk}`);
+      console.log(`   -> location: ${item.location_name}`);
+    }
+
+    return {
       id: `${item.lat}_${item.lon}`,
       lat: item.lat,
       lon: item.lon,
-      riskLevel: item.daily_fire_risk, // Updated field name
+      riskLevel: item.daily_fire_risk,
       location: item.location_name,
       province: item.province,
       lastUpdated: item.last_updated,
-      //Additional data that could be useful for detailed popups
       temperature: item.weather_features.temperature,
       humidity: item.weather_features.humidity,
       windSpeed: item.weather_features.wind_speed,
       fireDangerIndex: item.weather_features.fire_danger_index,
       modelConfidence: item.model_confidence
-    }));
-  }
+    };
+  });
+ }
 
     //Gets model metadata + performance metrics and normalizes naming for the UI
   static async getModelInfo(): Promise<{
@@ -212,13 +224,13 @@ export function useFireRiskData() {
   //Fetch predictions + model info from API
   const fetchData = async () => {
     try {
-      setLoading(true); //show spinner/loading state
-      setError(null);  //clear previous errors
+      setLoading(true);
+      setError(null);
 
       //Fetch both predictions and model info
       const [fireRiskData, modelData] = await Promise.all([
         FireRiskAPI.getFireRiskPredictions(),
-        FireRiskAPI.getModelInfo().catch(() => null) //Don't fail if model info unavailable
+        FireRiskAPI.getModelInfo().catch(() => null)
       ]);
 
       //Validate data structure before setting
@@ -246,14 +258,13 @@ export function useFireRiskData() {
       setModelInfo(modelData);
       setLastUpdated(new Date().toISOString());
 
-      console.log(`Loaded ${validatedData.length} daily fire risk predictions`);
+      console.log(`Loaded ${validatedData.length} fire risk predictions (updated every 2 hours)`);
       if (modelData) {
         console.log(`Model R²: ${(modelData.r2Score * 100).toFixed(1)}%, MAE: ${modelData.mae.toFixed(3)}`);
         console.log(`Risk range: ${modelData.riskRange[0].toFixed(3)} - ${modelData.riskRange[1].toFixed(3)}`);
       }
     } catch (err) {
       console.error('Failed to fetch ML predictions:', err);
-      //If it's an ApiError, use its message, otherwise generic fallback
       setError(err instanceof ApiError ? err.message : 'Failed to load ML predictions');
       
       //Fall back to mock data on error
@@ -273,22 +284,50 @@ export function useFireRiskData() {
   useEffect(() => {
     fetchData();
 
-     //Calculate time until 8:30 AM the next day
-     const now = new Date();
-     const tomorrow830 = new Date();
-     tomorrow830.setDate(now.getDate() + 1);
-     tomorrow830.setHours(8, 30, 0, 0);
+    // Calculate time until the next 2-hour interval (0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22)
+    const getNextUpdateTime = () => {
+      const now = new Date();
+      const currentHour = now.getHours();
+      const currentMinute = now.getMinutes();
+      
+      // Find next 2-hour interval
+      let nextHour = Math.ceil(currentHour / 2) * 2;
+      let nextDay = 0;
+      
+      // If we're past 22:00, next update is tomorrow at 00:00
+      if (nextHour >= 24) {
+        nextHour = 0;
+        nextDay = 1;
+      }
+      
+      const nextUpdate = new Date();
+      nextUpdate.setDate(now.getDate() + nextDay);
+      nextUpdate.setHours(nextHour, 0, 0, 0);
+      
+      // If we're exactly at a 2-hour mark but past the minute, wait for next interval
+      if (nextHour === currentHour && currentMinute > 5) {
+        nextUpdate.setHours(nextHour + 2, 0, 0, 0);
+        if (nextUpdate.getHours() >= 24) {
+          nextUpdate.setDate(nextUpdate.getDate() + 1);
+          nextUpdate.setHours(0, 0, 0, 0);
+        }
+      }
+      
+      return nextUpdate.getTime() - now.getTime();
+    };
 
-     const timeUntil830 = tomorrow830.getTime() - now.getTime();
+    const timeUntilNext = getNextUpdateTime();
+    
+    console.log(`Next data fetch in ${Math.round(timeUntilNext / (1000 * 60))} minutes`);
 
-     //Set timeout for 8:30 AM, then daily interval
-     const initialTimeout = setTimeout(() => {
+    //Set timeout for next 2-hour interval, then regular 2-hour intervals
+    const initialTimeout = setTimeout(() => {
       fetchData();
-      const dailyInterval = setInterval(fetchData, 24 * 60 * 60 * 1000);
-      return () => clearInterval(dailyInterval);
-     }, timeUntil830);
+      const twoHourInterval = setInterval(fetchData, 2 * 60 * 60 * 1000); // Every 2 hours
+      return () => clearInterval(twoHourInterval);
+    }, timeUntilNext);
 
-     return () => clearTimeout(initialTimeout);
+    return () => clearTimeout(initialTimeout);
   }, []);
 
   return {
@@ -303,7 +342,7 @@ export function useFireRiskData() {
 
 export const config = {
   apiUrl: API_BASE_URL,
-  refreshInterval: 5 * 60 * 1000, //5 mins
+  refreshInterval: 2 * 60 * 60 * 1000, // Updated to 2 hours
   maxRetries: 3,
-  retryDelay: 1000, //delay (ms) between retries
+  retryDelay: 1000,
 };
