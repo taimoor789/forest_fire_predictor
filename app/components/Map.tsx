@@ -1,21 +1,19 @@
 "use client";
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { FireRiskData } from '../types';
-import { mockFireRiskData } from '../lib/mockData';
 
-// Leaflet CSS is imported in globals.css
-
-const UnifiedLeafletMap = dynamic(
-  () => import('./UnifiedLeafletMap'),
+// Dynamically import the actual leaflet map component
+const LeafletMap = dynamic(
+  () => import('./LeafletMap'),
   {
-    ssr: false,
+     ssr: false,
     loading: () => (
-      <div className="flex items-center justify-center bg-gray-100 rounded-lg h-full min-h-[400px]">
+      <div className="h-full flex items-center justify-center bg-gray-100 rounded">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-red-600 mx-auto mb-2"></div>
-          <p className="text-gray-600">Loading Map...</p>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
+          <p className="text-gray-600">Loading map component...</p>
         </div>
       </div>
     )
@@ -26,66 +24,78 @@ interface MapProps {
   data?: FireRiskData[];
   height?: string;
   className?: string;
+  onLocationClick?: (location: FireRiskData) => void;
+  mapMode?: 'markers' | 'heatmap';
+  onStationCountUpdate?: (count: number) => void;
 }
 
 const Map: React.FC<MapProps> = ({
-  data = mockFireRiskData,
+  data = [],
   height = '700px',
-  className = ''
+  className = '',
+  onLocationClick,
+  mapMode = 'markers',
+  onStationCountUpdate
 }) => {
-  const [mounted, setMounted] = useState(false);
-  const [leafletReady, setLeafletReady] = useState(false);
+  const [isClient, setIsClient] = useState(false);
 
   useEffect(() => {
-    console.log('Map component mounted, data length:', data?.length);
-    
-    // Ensure we're in browser environment
-    if (typeof window !== 'undefined') {
-      setMounted(true);
-      
-      // Pre-load Leaflet CSS if not already loaded
-      const existingLink = document.querySelector('link[href*="leaflet"]');
-      if (!existingLink) {
-        const link = document.createElement('link');
-        link.rel = 'stylesheet';
-        link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-        link.onload = () => {
-          console.log('Leaflet CSS loaded');
-          setLeafletReady(true);
-        };
-        link.onerror = () => {
-          console.error('Failed to load Leaflet CSS');
-          setLeafletReady(true); // Continue anyway
-        };
-        document.head.appendChild(link);
-      } else {
-        setLeafletReady(true);
-      }
+    setIsClient(true);
+  }, []);
+
+  // Memoize data to prevent unnecessary re-renders
+  const memoizedData = useMemo(() => {
+    if (data && data.length > 0) {
+      return data.map(location => ({
+        ...location,
+        // Ensure we have valid coordinates
+        lat: typeof location.lat === 'number' ? location.lat : parseFloat(location.lat as string),
+        lon: typeof location.lon === 'number' ? location.lon : parseFloat(location.lon as string)
+      })).filter(location => 
+        !isNaN(location.lat) &&
+        !isNaN(location.lon) &&
+        location.lat >= -90 && location.lat <= 90 &&
+        location.lon >= -180 && location.lon <= 180
+      );
     }
+    return [];
   }, [data]);
 
-  if (!mounted || !leafletReady) {
+  // Handle station count updates from LeafletMap
+  const handleStationCountUpdate = useCallback((count: number) => {
+    if (onStationCountUpdate) {
+      onStationCountUpdate(count);
+    }
+  }, [onStationCountUpdate]);
+
+  // Show loading until we're definitely on the client
+  if (!isClient) {
     return (
       <div 
-        className={`flex items-center justify-center bg-gray-100 rounded-lg ${className}`} 
+        className={`flex items-center justify-center bg-gray-100 rounded-lg ${className}`}
         style={{ height, minHeight: '400px' }}
       >
         <div className="text-center">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-red-600 mx-auto mb-2"></div>
-          <p className="text-gray-600">
-            {!mounted ? 'Initializing...' : 'Loading Map Resources...'}
-          </p>
+          <p className="text-gray-600">Initializing Map...</p>
         </div>
       </div>
     );
   }
 
+  // Render the map component only when we have stable client-side mounting
   return (
     <div 
-      className={`relative rounded-lg overflow-hidden shadow-lg ${className}`} 
+      className={`relative rounded-lg overflow-hidden ${className}`}
       style={{ height, minHeight: '400px' }}
     >
-      <UnifiedLeafletMap data={data || []} height={height} />
+      <LeafletMap 
+        data={memoizedData}
+        height={height}
+        onLocationClick={onLocationClick}
+        mapMode={mapMode}
+        onStationCountUpdate={handleStationCountUpdate}
+      />
     </div>
   );
 };
