@@ -23,7 +23,7 @@ const getRiskLabel = (riskLevel: number): string => {
   return `Very Low (${percentage}%)`;
 };
 
-const StatisticsPanel: React.FC<{ data: FireRiskData[]; modelInfo: any; loading: boolean }> = ({ data, modelInfo, loading }) => {
+const StatisticsPanel: React.FC<{ data: FireRiskData[]; modelInfo: any; loading: boolean; userLocation: { lat: number; lon: number; city?: string } | null }> = ({ data, modelInfo, loading, userLocation }) => {
   const stats = useMemo(() => {
     if (!data || data.length === 0) return { veryHigh: 0, high: 0, medium: 0, low: 0, veryLow: 0 };
     return {
@@ -66,8 +66,10 @@ const StatisticsPanel: React.FC<{ data: FireRiskData[]; modelInfo: any; loading:
             <span className="font-medium text-amber-900">{data?.length || 0}</span>
           </div>
           <div className="flex justify-between text-sm">
-            <span className="text-amber-800">System Version:</span>
-            <span className="font-medium text-amber-900">{modelInfo.version}</span>
+              <span className="text-amber-800">Location Tracking:</span>
+              <span className={`font-medium ${userLocation ? 'text-green-600' : 'text-gray-500'}`}>
+                {userLocation ? 'On' : 'Off'}
+              </span>
           </div>
         </div>
       )}
@@ -120,38 +122,125 @@ const HeatmapLegend: React.FC = () => (
 const HighRiskAreas: React.FC<{ data: FireRiskData[]; loading: boolean }> = ({ data, loading }) => {
   const recentAlerts = useMemo(() => {
     if (!data || data.length === 0) return [];
-    interface StationData { location: string; provinces: Map<string, number>; maxRisk: number; gridCount: number; }
-    const stationDataMap = new Map<string, StationData>();
-    data.forEach(item => {
-      const key = item.location?.trim() || 'Unknown';
-      const existing = stationDataMap.get(key);
-      if (existing) {
-        existing.maxRisk = Math.max(existing.maxRisk, item.riskLevel);
-        existing.gridCount += 1;
-        const province = item.province || 'Unknown';
-        existing.provinces.set(province, (existing.provinces.get(province) || 0) + 1);
-      } else {
-        const provincesMap = new Map<string, number>();
-        provincesMap.set(item.province || 'Unknown', 1);
-        stationDataMap.set(key, { location: key, provinces: provincesMap, maxRisk: item.riskLevel, gridCount: 1 });
-      }
+    
+    // Use the same station aggregation logic as the markers
+    const stations = [
+      { name: "Vancouver", lat: 49.2827, lon: -123.1207, province: "BC" },
+      { name: "Kelowna", lat: 49.8880, lon: -119.4960, province: "BC" },
+      { name: "Kamloops", lat: 50.6745, lon: -120.3273, province: "BC" },
+      { name: "Calgary", lat: 51.0447, lon: -114.0719, province: "AB" },
+      { name: "Edmonton", lat: 53.5461, lon: -113.4938, province: "AB" },
+      { name: "Fort McMurray", lat: 56.7266, lon: -111.3790, province: "AB" },
+      { name: "Saskatoon", lat: 52.1579, lon: -106.6702, province: "SK" },
+      { name: "Regina", lat: 50.4452, lon: -104.6189, province: "SK" },
+      { name: "Winnipeg", lat: 49.8951, lon: -97.1384, province: "MB" },
+      { name: "Thunder Bay", lat: 48.3809, lon: -89.2477, province: "ON" },
+      { name: "Ottawa", lat: 45.4215, lon: -75.6972, province: "ON" },
+      { name: "Toronto", lat: 43.6510, lon: -79.3470, province: "ON" },
+      { name: "Sudbury", lat: 46.4917, lon: -80.9930, province: "ON" },
+      { name: "Montreal", lat: 45.5019, lon: -73.5674, province: "QC" },
+      { name: "Quebec City", lat: 46.8139, lon: -71.2080, province: "QC" },
+      { name: "Halifax", lat: 44.6488, lon: -63.5752, province: "NS" },
+      { name: "Whitehorse", lat: 60.7212, lon: -135.0568, province: "YT" },
+      { name: "Yellowknife", lat: 62.4540, lon: -114.3718, province: "NT" },
+      { name: "Prince George", lat: 53.9171, lon: -122.7497, province: "BC" },
+      { name: "Victoria", lat: 48.4284, lon: -123.3656, province: "BC" },
+      { name: "Smithers", lat: 54.7800, lon: -127.1743, province: "BC" },
+      { name: "Dease Lake", lat: 58.4356, lon: -130.0089, province: "BC" },
+      { name: "Fort St. John", lat: 56.2524, lon: -120.8466, province: "BC" },
+      { name: "High Level", lat: 58.5169, lon: -117.1360, province: "AB" },
+      { name: "Peace River", lat: 56.2333, lon: -117.2833, province: "AB" },
+      { name: "La Ronge", lat: 55.1000, lon: -105.3000, province: "SK" },
+      { name: "Flin Flon", lat: 54.7682, lon: -101.8779, province: "MB" },
+      { name: "Churchill", lat: 58.7684, lon: -94.1650, province: "MB" },
+      { name: "Moosonee", lat: 51.2794, lon: -80.6463, province: "ON" },
+      { name: "Timmins", lat: 48.4758, lon: -81.3305, province: "ON" },
+      { name: "Val-d'Or", lat: 48.1086, lon: -77.7972, province: "QC" },
+      { name: "Chibougamau", lat: 49.9167, lon: -74.3667, province: "QC" },
+      { name: "Schefferville", lat: 54.8000, lon: -66.8167, province: "QC" },
+      { name: "Goose Bay", lat: 53.3019, lon: -60.3267, province: "NL" },
+      { name: "St. John's", lat: 47.5615, lon: -52.7126, province: "NL" },
+      { name: "Iqaluit", lat: 63.7467, lon: -68.5170, province: "NU" },
+      { name: "Rankin Inlet", lat: 62.8090, lon: -92.0853, province: "NU" },
+      { name: "Cambridge Bay", lat: 69.1167, lon: -105.0667, province: "NU" }
+    ];
+
+    const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+      const R = 6371;
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+              Math.sin(dLon/2) * Math.sin(dLon/2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      return R * c;
+    };
+
+    const stationGroups = new Map<string, FireRiskData[]>();
+    stations.forEach(station => stationGroups.set(station.name, []));
+    
+    data.forEach(gridCell => {
+      const lat = Number(gridCell.lat);
+      const lon = Number(gridCell.lon);
+      if (isNaN(lat) || isNaN(lon)) return;
+      
+      let nearestStation = stations[0];
+      let minDistance = calculateDistance(lat, lon, nearestStation.lat, nearestStation.lon);
+      
+      stations.forEach(station => {
+        const distance = calculateDistance(lat, lon, station.lat, station.lon);
+        if (distance < minDistance) {
+          minDistance = distance;
+          nearestStation = station;
+        }
+      });
+      
+      stationGroups.get(nearestStation.name)!.push(gridCell);
     });
-    return Array.from(stationDataMap.values()).filter(s => s.maxRisk >= 0.35).sort((a, b) => b.maxRisk - a.maxRisk).slice(0, 3).map(s => {
-      let mostCommonProvince = 'Unknown', maxCount = 0;
-      s.provinces.forEach((count, province) => {
-        if (province !== 'Unknown' && count > maxCount) { maxCount = count; mostCommonProvince = province; }
-      });
-      if (mostCommonProvince === 'Unknown') s.provinces.forEach((count, province) => {
-        if (count > maxCount) { maxCount = count; mostCommonProvince = province; }
-      });
+    
+    // Calculate average risk for each station
+    const stationAverages = stations.map(station => {
+      const gridCells = stationGroups.get(station.name) || [];
+      const avgRisk = gridCells.length > 0 
+        ? gridCells.reduce((sum, cell) => sum + cell.riskLevel, 0) / gridCells.length 
+        : 0.1;
+      
+      // Use the same thresholds as getRiskColor for consistency
+      let riskLevel: string;
+      let color: string;
+      if (avgRisk >= 0.8) {
+        riskLevel = 'V.HIGH';
+        color = 'red';
+      } else if (avgRisk >= 0.6) {
+        riskLevel = 'HIGH';
+        color = 'orange';
+      } else if (avgRisk >= 0.4) {
+        riskLevel = 'MED';
+        color = 'yellow';
+      } else if (avgRisk >= 0.2) {
+        riskLevel = 'LOW';
+        color = 'green';
+      } else {
+        riskLevel = 'V.LOW';
+        color = 'green';
+      }
+      
       return {
-        id: s.location, location: s.location, province: mostCommonProvince,
-        riskLevel: s.maxRisk >= 0.65 ? 'HIGH' : s.maxRisk >= 0.35 ? 'MED' : 'LOW',
-        message: `Risk level ${Math.round(s.maxRisk * 100)}%`,
-        color: s.maxRisk >= 0.8 ? 'red' : s.maxRisk >= 0.65 ? 'orange' : 'yellow',
-        actualRisk: s.maxRisk
+        id: station.name,
+        location: station.name,
+        province: station.province,
+        avgRisk: avgRisk,
+        riskLevel: riskLevel,
+        message: `Average risk ${Math.round(avgRisk * 100)}%`,
+        color: color
       };
     });
+    
+    // Sort by average risk and take top 3
+    return stationAverages
+      .sort((a, b) => b.avgRisk - a.avgRisk)
+      .slice(0, 3)
+      .filter(s => s.avgRisk >= 0.2); // Only show if risk is above very low
   }, [data]);
 
   return (
@@ -194,15 +283,17 @@ const FireRiskDashboard: React.FC = () => {
 
   // Geolocation effect
   React.useEffect(() => {
+    console.log('Requesting geolocation...');
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
+          console.log('Geolocation success:', position.coords);
           const userLat = position.coords.latitude;
           const userLon = position.coords.longitude;
           setUserLocation({ lat: userLat, lon: userLon });
           setLocationError(null);
           
-          // Reverse geocode to get city name (optional, using a simple approach)
+          // Reverse geocode to get city name
           fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${userLat}&lon=${userLon}`)
             .then(res => res.json())
             .then(data => {
@@ -214,11 +305,29 @@ const FireRiskDashboard: React.FC = () => {
             });
         },
         (error) => {
-          setLocationError('Location access denied');
-          console.error('Geolocation error:', error);
+          // Only log if there's a real error code
+          if (error && typeof error === 'object' && 'code' in error && error.code) {
+            console.error('Geolocation error:', error);
+            if (error.code === 1) {
+              setLocationError('Location access denied');
+            } else if (error.code === 2) {
+              setLocationError('Location unavailable');
+            } else if (error.code === 3) {
+              setLocationError('Location request timeout');
+            }
+          } else {
+            // Silent fail for empty/malformed errors
+            setLocationError('Location access denied');
+          }
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0
         }
       );
     } else {
+      console.log('Geolocation not supported');
       setLocationError('Geolocation not supported');
     }
   }, []);
@@ -252,17 +361,17 @@ const FireRiskDashboard: React.FC = () => {
         distance: calculateDistance(userLocation.lat, userLocation.lon, station.lat, station.lon)
       }));
 
-      // Sort by distance and take top 3
-      const nearest = stationsWithDistance.sort((a, b) => a.distance - b.distance).slice(0, 3);
+      // Sort by distance and take top 2
+      const nearest = stationsWithDistance.sort((a, b) => a.distance - b.distance).slice(0, 2);
       setNearestStations(nearest);
     }
   }, [data, userLocation]);
   
   const handleModeSwitch = (mode: 'markers' | 'heatmap') => {
     if (mode === mapMode) return;
-    setPendingMode(mode);
     setMapMode(mode);
-    setTimeout(() => setPendingMode(null), 200);
+    setPendingMode(mode);
+    setTimeout(() => setPendingMode(null), 1000);
   };
 
   const formatLastUpdated = (timestamp: string | null) => {
@@ -329,7 +438,14 @@ const FireRiskDashboard: React.FC = () => {
                   {mapMode === 'markers' ? 'Click markers to view detailed station risk information and weather conditions.' : 'Heat zones show fire risk density and intensity across Canadian regions.'}
                 </p>
               </div>
-              <MapComponent height="700px" className="border-2 border-amber-300 rounded-lg shadow-md" data={data || []} mapMode={mapMode} onStationCountUpdate={setStationCount} />
+              <MapComponent 
+                height="700px" 
+                className="border-2 border-amber-300 rounded-lg shadow-md" 
+                data={data || []} 
+                mapMode={mapMode} 
+                onStationCountUpdate={setStationCount}
+                userLocation={userLocation}
+              />
             </div>
 
             <div className="rounded-lg shadow-lg backdrop-blur-sm p-6" style={{ backgroundColor: 'rgba(255, 248, 230, 0.85)', border: '1px solid rgba(218, 165, 32, 0.3)' }}>
@@ -431,7 +547,52 @@ const FireRiskDashboard: React.FC = () => {
           </div>
 
           <div className="lg:col-span-1 space-y-6">
-            <StatisticsPanel data={data || []} modelInfo={modelInfo} loading={loading} />
+            {userLocation && (
+              <div className="rounded-lg shadow-lg backdrop-blur-sm p-6 mb-6" style={{ backgroundColor: 'rgba(255, 248, 230, 0.85)', border: '1px solid rgba(218, 165, 32, 0.3)' }}>
+                <div className="flex items-center mb-4">
+                  <MapPin className="w-5 h-5 mr-2 text-orange-700" />
+                  <h3 className="text-lg font-semibold text-amber-900">Nearest Stations</h3>
+                </div>
+                <div className="mb-3 pb-3 border-b border-amber-200">
+                  <div className="text-sm text-amber-800">
+                    <span className="font-medium">📍 {userLocation.city || 'Your Location'}</span>
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  {nearestStations.length > 0 ? nearestStations.map((item, index) => (
+                    <div key={index} className="p-3 rounded-lg shadow-sm" style={{ backgroundColor: 'rgba(255, 255, 255, 0.7)' }}>
+                      <div className="flex justify-between items-start mb-2">
+                        <div className="font-medium text-sm text-amber-900">{item.station.location}</div>
+                        <div className="text-xs text-orange-700 font-semibold">{Math.round(item.distance)} km</div>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div className="text-xs text-amber-800">{item.station.province}</div>
+                        <div className="text-xs px-2 py-1 rounded" style={{ 
+                          backgroundColor: getRiskColor(item.station.riskLevel) + '20',
+                          color: getRiskColor(item.station.riskLevel),
+                          fontWeight: 600
+                        }}>
+                          {Math.round(item.station.riskLevel * 100)}% Risk
+                        </div>
+                      </div>
+                    </div>
+                  )) : (
+                    <div className="text-center text-amber-700 text-sm py-4">
+                      Calculating nearest stations...
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            {locationError && (
+              <div className="rounded-lg shadow-lg backdrop-blur-sm p-4 mb-6" style={{ backgroundColor: 'rgba(254, 243, 199, 0.9)', border: '1px solid rgba(245, 158, 11, 0.3)' }}>
+                <div className="flex items-center text-sm text-amber-800">
+                  <AlertTriangle className="w-4 h-4 mr-2 flex-shrink-0" />
+                  <span>Enable location to see nearest stations</span>
+                </div>
+              </div>
+            )}
+            <StatisticsPanel data={data || []} modelInfo={modelInfo} loading={loading} userLocation={userLocation} />
             {mapMode === 'heatmap' ? <HeatmapLegend /> : <Legend />}
             <HighRiskAreas data={data || []} loading={loading} />
             <div className="rounded-lg shadow-lg backdrop-blur-sm p-6" style={{ backgroundColor: 'rgba(255, 248, 230, 0.85)', border: '1px solid rgba(218, 165, 32, 0.3)' }}>

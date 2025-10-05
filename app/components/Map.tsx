@@ -4,11 +4,10 @@ import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { FireRiskData } from '../types';
 
-// Dynamically import the actual leaflet map component
 const LeafletMap = dynamic(
   () => import('./LeafletMap'),
   {
-     ssr: false,
+    ssr: false,
     loading: () => (
       <div className="h-full flex items-center justify-center bg-gray-100 rounded">
         <div className="text-center">
@@ -27,6 +26,7 @@ interface MapProps {
   onLocationClick?: (location: FireRiskData) => void;
   mapMode?: 'markers' | 'heatmap';
   onStationCountUpdate?: (count: number) => void;
+  userLocation?: { lat: number; lon: number; city?: string } | null;
 }
 
 const Map: React.FC<MapProps> = ({
@@ -35,7 +35,8 @@ const Map: React.FC<MapProps> = ({
   className = '',
   onLocationClick,
   mapMode = 'markers',
-  onStationCountUpdate
+  onStationCountUpdate,
+  userLocation
 }) => {
   const [isClient, setIsClient] = useState(false);
 
@@ -43,12 +44,10 @@ const Map: React.FC<MapProps> = ({
     setIsClient(true);
   }, []);
 
-  // Memoize data to prevent unnecessary re-renders
   const memoizedData = useMemo(() => {
     if (data && data.length > 0) {
       return data.map(location => ({
         ...location,
-        // Ensure we have valid coordinates
         lat: typeof location.lat === 'number' ? location.lat : parseFloat(location.lat as string),
         lon: typeof location.lon === 'number' ? location.lon : parseFloat(location.lon as string)
       })).filter(location => 
@@ -61,14 +60,12 @@ const Map: React.FC<MapProps> = ({
     return [];
   }, [data]);
 
-  // Handle station count updates from LeafletMap
   const handleStationCountUpdate = useCallback((count: number) => {
     if (onStationCountUpdate) {
       onStationCountUpdate(count);
     }
   }, [onStationCountUpdate]);
 
-  // Show loading until we're definitely on the client
   if (!isClient) {
     return (
       <div 
@@ -83,7 +80,6 @@ const Map: React.FC<MapProps> = ({
     );
   }
 
-  // Render the map component only when we have stable client-side mounting
   return (
     <div 
       className={`relative rounded-lg overflow-hidden ${className}`}
@@ -95,6 +91,7 @@ const Map: React.FC<MapProps> = ({
         onLocationClick={onLocationClick}
         mapMode={mapMode}
         onStationCountUpdate={handleStationCountUpdate}
+        userLocation={userLocation}
       />
     </div>
   );
