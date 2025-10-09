@@ -1,10 +1,13 @@
 "use client";
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { MapPin, Layers, AlertTriangle, TrendingUp, Database, ExternalLink } from 'lucide-react';
 import MapComponent from './Map';
 import { useFireRiskData } from '../lib/api';
 import { FireRiskData } from '../types';
+
+const CACHE_KEY = 'fireRiskDataCache';
+const CACHE_TIMESTAMP_KEY = 'fireRiskDataCacheTimestamp';
 
 const getRiskColor = (riskLevel: number): string => {
   if (riskLevel >= 0.8) return '#d32f2f';
@@ -66,10 +69,10 @@ const StatisticsPanel: React.FC<{ data: FireRiskData[]; modelInfo: any; loading:
             <span className="font-medium text-amber-900">{data?.length || 0}</span>
           </div>
           <div className="flex justify-between text-sm">
-              <span className="text-amber-800">Location Tracking:</span>
-              <span className={`font-medium ${userLocation ? 'text-green-600' : 'text-gray-500'}`}>
-                {userLocation ? 'On' : 'Off'}
-              </span>
+            <span className="text-amber-800">Location Tracking:</span>
+            <span className={`font-medium ${userLocation ? 'text-green-600' : 'text-gray-500'}`}>
+              {userLocation ? 'On' : 'Off'}
+            </span>
           </div>
         </div>
       )}
@@ -123,7 +126,6 @@ const HighRiskAreas: React.FC<{ data: FireRiskData[]; loading: boolean }> = ({ d
   const recentAlerts = useMemo(() => {
     if (!data || data.length === 0) return [];
     
-    // Use the same station aggregation logic as the markers
     const stations = [
       { name: "Vancouver", lat: 49.2827, lon: -123.1207, province: "BC" },
       { name: "Kelowna", lat: 49.8880, lon: -119.4960, province: "BC" },
@@ -198,30 +200,28 @@ const HighRiskAreas: React.FC<{ data: FireRiskData[]; loading: boolean }> = ({ d
       stationGroups.get(nearestStation.name)!.push(gridCell);
     });
     
-    // Calculate average risk for each station
     const stationAverages = stations.map(station => {
       const gridCells = stationGroups.get(station.name) || [];
       const avgRisk = gridCells.length > 0 
         ? gridCells.reduce((sum, cell) => sum + cell.riskLevel, 0) / gridCells.length 
         : 0.1;
       
-      // Use the same thresholds as getRiskColor for consistency
+      const displayPercent = Math.round(avgRisk * 100);
+      const roundedRisk = displayPercent / 100;
+      
       let riskLevel: string;
       let color: string;
-      if (avgRisk >= 0.8) {
+      if (roundedRisk >= 0.8) {
         riskLevel = 'V.HIGH';
         color = 'red';
-      } else if (avgRisk >= 0.6) {
+      } else if (roundedRisk >= 0.6) {
         riskLevel = 'HIGH';
         color = 'orange';
-      } else if (avgRisk >= 0.4) {
+      } else if (roundedRisk >= 0.4) {
         riskLevel = 'MED';
         color = 'yellow';
-      } else if (avgRisk >= 0.2) {
-        riskLevel = 'LOW';
-        color = 'green';
       } else {
-        riskLevel = 'V.LOW';
+        riskLevel = 'LOW';
         color = 'green';
       }
       
@@ -229,18 +229,17 @@ const HighRiskAreas: React.FC<{ data: FireRiskData[]; loading: boolean }> = ({ d
         id: station.name,
         location: station.name,
         province: station.province,
-        avgRisk: avgRisk,
+        avgRisk: roundedRisk,
         riskLevel: riskLevel,
-        message: `Average risk ${Math.round(avgRisk * 100)}%`,
+        message: `Average risk ${displayPercent}%`,
         color: color
       };
     });
     
-    // Sort by average risk and take top 3
     return stationAverages
       .sort((a, b) => b.avgRisk - a.avgRisk)
       .slice(0, 3)
-      .filter(s => s.avgRisk >= 0.2); // Only show if risk is above very low
+      .filter(s => s.avgRisk >= 0.2);
   }, [data]);
 
   return (
@@ -253,8 +252,15 @@ const HighRiskAreas: React.FC<{ data: FireRiskData[]; loading: boolean }> = ({ d
         {loading ? <div className="text-center text-amber-700 py-4">Loading...</div> : 
         recentAlerts.length > 0 ? recentAlerts.map(alert => (
           <div key={alert.id} className={`flex items-start space-x-3 p-3 rounded-lg border-l-4 shadow-sm ${
-            alert.color === 'red' ? 'bg-red-50 border-red-500' : alert.color === 'orange' ? 'bg-orange-50 border-orange-500' : 'bg-yellow-50 border-yellow-500'}`}>
-            <div className={`font-bold text-xs ${alert.color === 'red' ? 'text-red-600' : alert.color === 'orange' ? 'text-orange-600' : 'text-yellow-600'}`}>{alert.riskLevel}</div>
+            alert.color === 'red' ? 'bg-red-50 border-red-500' : 
+            alert.color === 'orange' ? 'bg-orange-50 border-orange-500' : 
+            alert.color === 'yellow' ? 'bg-yellow-50 border-yellow-500' : 
+            'bg-green-50 border-green-500'}`}>
+            <div className={`font-bold text-xs ${
+              alert.color === 'red' ? 'text-red-600' : 
+              alert.color === 'orange' ? 'text-orange-600' : 
+              alert.color === 'yellow' ? 'text-yellow-600' : 
+              'text-green-600'}`}>{alert.riskLevel}</div>
             <div>
               <div className="text-sm font-medium text-gray-900">{alert.location}</div>
               <div className="text-xs text-gray-700">{alert.province}</div>
@@ -280,9 +286,82 @@ const FireRiskDashboard: React.FC = () => {
   const [userLocation, setUserLocation] = useState<{ lat: number; lon: number; city?: string } | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [nearestStations, setNearestStations] = useState<Array<{ station: FireRiskData; distance: number }>>([]);
+  const [cachedData, setCachedData] = useState<FireRiskData[] | null>(null);
+  const [showCachedWarning, setShowCachedWarning] = useState(false);
 
-  // Geolocation effect
-  React.useEffect(() => {
+  // Load cached data on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const cached = localStorage.getItem(CACHE_KEY);
+      const cacheTime = localStorage.getItem(CACHE_TIMESTAMP_KEY);
+      if (cached) {
+        try {
+          const parsedData = JSON.parse(cached);
+          setCachedData(parsedData);
+          if (cacheTime) {
+            const age = Date.now() - parseInt(cacheTime);
+            if (age > 2 * 60 * 60 * 1000) {
+              setShowCachedWarning(true);
+            }
+          }
+        } catch (e) {
+          console.error('Failed to parse cached data:', e);
+        }
+      }
+    }
+  }, []);
+
+  // Cache data when it updates (store only essential fields to save space)
+  useEffect(() => {
+    if (data && data.length > 0 && typeof window !== 'undefined') {
+      try {
+        // Compress data by storing only essential fields
+        const compressedData = data.map(item => ({
+          id: item.id,
+          lat: item.lat,
+          lon: item.lon,
+          riskLevel: item.riskLevel,
+          location: item.location,
+          province: item.province,
+          temperature: item.temperature,
+          humidity: item.humidity,
+          windSpeed: item.windSpeed
+        }));
+        
+        const dataString = JSON.stringify(compressedData);
+        
+        // Check if data size is reasonable (< 4MB to be safe)
+        if (dataString.length < 4 * 1024 * 1024) {
+          localStorage.setItem(CACHE_KEY, dataString);
+          localStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString());
+          setCachedData(data);
+          setShowCachedWarning(false);
+        } else {
+          console.warn('Data too large to cache, skipping localStorage');
+        }
+      } catch (e) {
+        if (e instanceof Error && e.name === 'QuotaExceededError') {
+          console.warn('localStorage quota exceeded, clearing old cache');
+          // Clear cache and try with compressed data only
+          localStorage.removeItem(CACHE_KEY);
+          localStorage.removeItem(CACHE_TIMESTAMP_KEY);
+        } else {
+          console.error('Failed to cache data:', e);
+        }
+      }
+    }
+  }, [data]);
+
+  const displayData = data && data.length > 0 ? data : cachedData;
+  
+  const handleModeSwitch = (mode: 'markers' | 'heatmap') => {
+    if (mode === mapMode) return;
+    setMapMode(mode);
+    setPendingMode(mode);
+    setTimeout(() => setPendingMode(null), 1000);
+  };
+
+  useEffect(() => {
     console.log('Requesting geolocation...');
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -293,7 +372,6 @@ const FireRiskDashboard: React.FC = () => {
           setUserLocation({ lat: userLat, lon: userLon });
           setLocationError(null);
           
-          // Reverse geocode to get city name
           fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${userLat}&lon=${userLon}`)
             .then(res => res.json())
             .then(data => {
@@ -305,7 +383,6 @@ const FireRiskDashboard: React.FC = () => {
             });
         },
         (error) => {
-          // Only log if there's a real error code
           if (error && typeof error === 'object' && 'code' in error && error.code) {
             console.error('Geolocation error:', error);
             if (error.code === 1) {
@@ -316,7 +393,6 @@ const FireRiskDashboard: React.FC = () => {
               setLocationError('Location request timeout');
             }
           } else {
-            // Silent fail for empty/malformed errors
             setLocationError('Location access denied');
           }
         },
@@ -332,19 +408,16 @@ const FireRiskDashboard: React.FC = () => {
     }
   }, []);
 
-  // Calculate nearest stations when data or user location changes
-  React.useEffect(() => {
-    if (data && data.length > 0 && userLocation) {
-      // Group by station location
+  useEffect(() => {
+    if (displayData && displayData.length > 0 && userLocation) {
       const stationMap = new Map<string, FireRiskData>();
-      data.forEach(point => {
+      displayData.forEach(point => {
         const key = `${point.lat},${point.lon}`;
         if (!stationMap.has(key) || point.riskLevel > stationMap.get(key)!.riskLevel) {
           stationMap.set(key, point);
         }
       });
 
-      // Calculate distances
       const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
         const R = 6371;
         const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -361,18 +434,61 @@ const FireRiskDashboard: React.FC = () => {
         distance: calculateDistance(userLocation.lat, userLocation.lon, station.lat, station.lon)
       }));
 
-      // Sort by distance and take top 2
       const nearest = stationsWithDistance.sort((a, b) => a.distance - b.distance).slice(0, 2);
       setNearestStations(nearest);
     }
-  }, [data, userLocation]);
-  
-  const handleModeSwitch = (mode: 'markers' | 'heatmap') => {
-    if (mode === mapMode) return;
-    setMapMode(mode);
-    setPendingMode(mode);
-    setTimeout(() => setPendingMode(null), 1000);
+  }, [displayData, userLocation]);
+
+  const getTimeAgo = () => {
+    if (!lastUpdated) {
+      return 'Loading...';
+    }
+    
+    const now = new Date();
+    const updated = new Date(lastUpdated);
+    const diffMs = now.getTime() - updated.getTime();
+    const diffMinutes = Math.floor(diffMs / (1000 * 60));
+    
+    if (diffMinutes < 2) return 'Updated moments ago';
+    if (diffMinutes < 60) return `Updated ${diffMinutes} min ago`;
+    
+    const hours = Math.floor(diffMinutes / 60);
+    const minutes = diffMinutes % 60;
+    
+    if (hours === 1 && minutes === 0) return 'Updated 1 hour ago';
+    if (hours === 1) return `Updated 1 hr ${minutes} min ago`;
+    if (minutes === 0) return `Updated ${hours} hrs ago`;
+    return `Updated ${hours} hrs ${minutes} min ago`;
   };
+  
+  const getUpdateStatus = () => {
+    const now = new Date();
+    const currentHour = now.getHours();
+    const currentMinute = now.getMinutes();
+    
+    // Find the last scheduled 2-hour mark
+    const lastScheduledHour = Math.floor(currentHour / 2) * 2;
+    
+    // Calculate minutes since last scheduled update
+    const hoursSinceScheduled = currentHour - lastScheduledHour;
+    const minutesSinceScheduled = hoursSinceScheduled * 60 + currentMinute;
+    
+    // If we're within 12 minutes of a scheduled update, show "updating soon" message
+    if (minutesSinceScheduled <= 12 && loading) {
+      return {
+        status: 'updating',
+        message: 'Processing latest data...'
+      };
+    }
+    
+    // Otherwise show normal status
+    return {
+      status: loading ? 'loading' : error ? 'error' : 'updated',
+      message: error ? 'Connection issue' : getTimeAgo()
+    };
+  };
+  
+  const updateStatus = getUpdateStatus();
 
   const formatLastUpdated = (timestamp: string | null) => {
     if (!timestamp) return new Date().toLocaleDateString('en-CA');
@@ -381,20 +497,25 @@ const FireRiskDashboard: React.FC = () => {
     });
   };
 
-  if (loading && (!data || data.length === 0)) {
-    return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #FFF8DC 0%, #FFE4B5 50%, #FFDAB9 100%)' }}>
-        <div className="text-center">
-          <div className="animate-spin rounded-full w-8 h-8 border-b-2 border-orange-600 mx-auto mb-4"></div>
-          <div className="text-lg font-medium text-amber-900">Loading fire risk data...</div>
-          <div className="text-sm text-amber-700">Calculating Fire Weather Index...</div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <main className="min-h-screen" style={{ background: 'linear-gradient(135deg, #FFF8DC 0%, #FFE4B5 50%, #FFDAB9 100%)' }}>
+      <style jsx global>{`
+        /* Custom scrollbar styling for sidebar */
+        .sidebar-scroll::-webkit-scrollbar {
+          width: 8px;
+        }
+        .sidebar-scroll::-webkit-scrollbar-track {
+          background: rgba(218, 165, 32, 0.1);
+          border-radius: 10px;
+        }
+        .sidebar-scroll::-webkit-scrollbar-thumb {
+          background: rgba(218, 165, 32, 0.5);
+          border-radius: 10px;
+        }
+        .sidebar-scroll::-webkit-scrollbar-thumb:hover {
+          background: rgba(218, 165, 32, 0.7);
+        }
+      `}</style>
       <header className="shadow-md backdrop-blur-sm" style={{ backgroundColor: 'rgba(255, 218, 155, 0.7)', borderBottom: '2px solid rgba(218, 165, 32, 0.4)' }}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="text-center">
@@ -408,6 +529,11 @@ const FireRiskDashboard: React.FC = () => {
               <Database className="w-5 h-5 text-amber-800" />
               <span className="text-sm text-amber-800">Environment and Climate Change Canada Data</span>
             </div>
+            {showCachedWarning && (
+              <div className="mt-4 inline-block bg-yellow-100 border border-yellow-300 rounded px-3 py-1 text-xs text-yellow-800">
+                Showing cached data - refreshing...
+              </div>
+            )}
           </div>
         </div> 
       </header>
@@ -421,8 +547,15 @@ const FireRiskDashboard: React.FC = () => {
                   <div className="flex items-center gap-4">
                     <h2 className="text-xl font-semibold text-amber-900">Canada Fire Risk Map</h2>
                     <div className="flex items-center space-x-2">
-                      <div className={`w-2 h-2 rounded-full shadow-sm ${loading ? 'bg-yellow-500 animate-pulse' : error ? 'bg-red-500' : 'bg-green-500'}`}></div>
-                      <span className="text-xs text-amber-900 font-medium">Last updated: {formatLastUpdated(lastUpdated)}</span>
+                      <div className={`w-2.5 h-2.5 rounded-full shadow-sm ${
+                        updateStatus.status === 'updating' ? 'bg-blue-500 animate-pulse' :
+                        updateStatus.status === 'loading' ? 'bg-yellow-500 animate-pulse' : 
+                        updateStatus.status === 'error' ? 'bg-red-500' : 
+                        'bg-green-500'
+                      }`}></div>
+                      <span className="text-xs text-amber-900 font-medium leading-none flex items-center h-2.5">
+                        {updateStatus.message}
+                      </span>
                     </div>
                   </div>
                   <div className="flex items-center rounded-lg p-1" style={{ backgroundColor: 'rgba(255, 255, 255, 0.5)' }}>
@@ -438,21 +571,14 @@ const FireRiskDashboard: React.FC = () => {
                   {mapMode === 'markers' ? 'Click markers to view detailed station risk information and weather conditions.' : 'Heat zones show fire risk density and intensity across Canadian regions.'}
                 </p>
               </div>
-              <MapComponent 
-                height="700px" 
-                className="border-2 border-amber-300 rounded-lg shadow-md" 
-                data={data || []} 
-                mapMode={mapMode} 
-                onStationCountUpdate={setStationCount}
-                userLocation={userLocation}
-              />
+              <MapComponent height="600px" className="border-2 border-amber-300 rounded-lg shadow-md" data={displayData || []} mapMode={mapMode} onStationCountUpdate={setStationCount} userLocation={userLocation} />
             </div>
 
             <div className="rounded-lg shadow-lg backdrop-blur-sm p-6" style={{ backgroundColor: 'rgba(255, 248, 230, 0.85)', border: '1px solid rgba(218, 165, 32, 0.3)' }}>
               <h3 className="text-lg font-semibold text-amber-900 mb-4">National Risk Overview</h3>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="text-center p-4 rounded-lg shadow-sm" style={{ backgroundColor: 'rgba(255, 255, 255, 0.6)' }}>
-                  <div className="text-2xl font-bold text-amber-900">{data ? data.length.toLocaleString() : '0'}</div>
+                  <div className="text-2xl font-bold text-amber-900">{displayData ? displayData.length.toLocaleString() : '0'}</div>
                   <div className="text-xs text-amber-800 mt-1">Grid Cells Monitored</div>
                 </div>
                 <div className="text-center p-4 bg-blue-50 rounded-lg shadow-sm border border-blue-200">
@@ -460,11 +586,11 @@ const FireRiskDashboard: React.FC = () => {
                   <div className="text-xs text-blue-800 mt-1">Weather Stations</div>
                 </div>
                 <div className="text-center p-4 bg-green-50 rounded-lg shadow-sm border border-green-200">
-                  <div className="text-2xl font-bold text-green-600">{data ? Math.round((data.filter(d => d.riskLevel < 0.4).length / data.length) * 100) : 0}%</div>
+                  <div className="text-2xl font-bold text-green-600">{displayData ? Math.round((displayData.filter(d => d.riskLevel < 0.4).length / displayData.length) * 100) : 0}%</div>
                   <div className="text-xs text-green-800 mt-1">Low Risk Areas</div>
                 </div>
                 <div className="text-center p-4 bg-orange-50 rounded-lg shadow-sm border border-orange-200">
-                  <div className="text-2xl font-bold text-orange-600">{data ? Math.round((data.filter(d => d.riskLevel >= 0.6).length / data.length) * 100) : 0}%</div>
+                  <div className="text-2xl font-bold text-orange-600">{displayData ? Math.round((displayData.filter(d => d.riskLevel >= 0.6).length / displayData.length) * 100) : 0}%</div>
                   <div className="text-xs text-orange-800 mt-1">High Risk Areas</div>
                 </div>
               </div>
@@ -505,7 +631,7 @@ const FireRiskDashboard: React.FC = () => {
                   <ExternalLink className="w-4 h-4 text-gray-400 group-hover:text-orange-600 transition-colors flex-shrink-0 ml-2 mt-1" />
                 </a>
 
-                <a href="https://www.canada.ca/en/public-safety-canada/campaigns/wildfires.html" target="_blank" rel="noopener noreferrer"
+                <a href="https://www.canada.ca/en/health-canada/services/publications/healthy-living/how-prepare-wildfire-smoke.html" target="_blank" rel="noopener noreferrer"
                    className="group flex items-start p-3 bg-gradient-to-br from-yellow-50 to-amber-50 rounded-xl hover:shadow-lg transition-all duration-200 border border-yellow-200 hover:border-yellow-300">
                   <div className="flex-shrink-0 w-11 h-11 bg-white rounded-lg flex items-center justify-center shadow-sm group-hover:shadow-md transition-shadow mr-3">
                     <svg className="w-6 h-6 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -546,8 +672,9 @@ const FireRiskDashboard: React.FC = () => {
             </div>
           </div>
 
-          <div className="lg:col-span-1 space-y-6">
-            {userLocation && (
+          <div className="lg:col-span-1 sidebar-scroll" style={{ position: 'sticky', top: '20px', alignSelf: 'flex-start', maxHeight: 'calc(100vh - 40px)', overflowY: 'auto', paddingRight: '4px' }}>
+            <div className="space-y-6">
+            {userLocation && nearestStations.length > 0 && (
               <div className="rounded-lg shadow-lg backdrop-blur-sm p-6 mb-6" style={{ backgroundColor: 'rgba(255, 248, 230, 0.85)', border: '1px solid rgba(218, 165, 32, 0.3)' }}>
                 <div className="flex items-center mb-4">
                   <MapPin className="w-5 h-5 mr-2 text-orange-700" />
@@ -559,32 +686,32 @@ const FireRiskDashboard: React.FC = () => {
                   </div>
                 </div>
                 <div className="space-y-3">
-                  {nearestStations.length > 0 ? nearestStations.map((item, index) => (
-                    <div key={index} className="p-3 rounded-lg shadow-sm" style={{ backgroundColor: 'rgba(255, 255, 255, 0.7)' }}>
-                      <div className="flex justify-between items-start mb-2">
-                        <div className="font-medium text-sm text-amber-900">{item.station.location}</div>
-                        <div className="text-xs text-orange-700 font-semibold">{Math.round(item.distance)} km</div>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div className="text-xs text-amber-800">{item.station.province}</div>
-                        <div className="text-xs px-2 py-1 rounded" style={{ 
-                          backgroundColor: getRiskColor(item.station.riskLevel) + '20',
-                          color: getRiskColor(item.station.riskLevel),
-                          fontWeight: 600
-                        }}>
-                          {Math.round(item.station.riskLevel * 100)}% Risk
+                  {nearestStations.map((item, index) => {
+                    const roundedRisk = Math.round(item.station.riskLevel * 100) / 100;
+                    const riskColor = getRiskColor(roundedRisk);
+                    return (
+                      <div key={index} className="p-3 rounded-lg shadow-sm" style={{ backgroundColor: 'rgba(255, 255, 255, 0.7)' }}>
+                        <div className="flex justify-between items-start mb-2">
+                          <div className="font-medium text-sm text-amber-900">{item.station.location}</div>
+                          <div className="text-xs text-orange-700 font-semibold">{Math.round(item.distance)} km</div>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <div className="text-xs text-amber-800">{item.station.province}</div>
+                          <div className="text-xs px-2 py-1 rounded" style={{ 
+                            backgroundColor: riskColor + '20',
+                            color: riskColor,
+                            fontWeight: 600
+                          }}>
+                            {Math.round(item.station.riskLevel * 100)}% Risk
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  )) : (
-                    <div className="text-center text-amber-700 text-sm py-4">
-                      Calculating nearest stations...
-                    </div>
-                  )}
+                    );
+                  })}
                 </div>
               </div>
             )}
-            {locationError && (
+            {locationError && !userLocation && (
               <div className="rounded-lg shadow-lg backdrop-blur-sm p-4 mb-6" style={{ backgroundColor: 'rgba(254, 243, 199, 0.9)', border: '1px solid rgba(245, 158, 11, 0.3)' }}>
                 <div className="flex items-center text-sm text-amber-800">
                   <AlertTriangle className="w-4 h-4 mr-2 flex-shrink-0" />
@@ -592,9 +719,9 @@ const FireRiskDashboard: React.FC = () => {
                 </div>
               </div>
             )}
-            <StatisticsPanel data={data || []} modelInfo={modelInfo} loading={loading} userLocation={userLocation} />
+            <StatisticsPanel data={displayData || []} modelInfo={modelInfo} loading={loading} userLocation={userLocation} />
             {mapMode === 'heatmap' ? <HeatmapLegend /> : <Legend />}
-            <HighRiskAreas data={data || []} loading={loading} />
+            <HighRiskAreas data={displayData || []} loading={loading} />
             <div className="rounded-lg shadow-lg backdrop-blur-sm p-6" style={{ backgroundColor: 'rgba(255, 248, 230, 0.85)', border: '1px solid rgba(218, 165, 32, 0.3)' }}>
               <h3 className="text-lg font-semibold text-amber-900 mb-4">About the System</h3>
               <div className="text-sm text-amber-800 space-y-3">
@@ -609,26 +736,29 @@ const FireRiskDashboard: React.FC = () => {
                     <li className="flex items-start"><span className="text-orange-600 mr-2">•</span><span>Buildup & Spread Indices</span></li>
                   </ul>
                 </div>
-                {modelInfo && (
-                  <div className="text-xs pt-3 border-t border-amber-200 space-y-1">
-                    <div className="flex justify-between">
-                      <span className="text-amber-800">Grid Locations:</span>
-                      <span className="font-medium text-amber-900">{data?.length || 0}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-amber-800">Weather Stations:</span>
-                      <span className="font-medium text-amber-900">{stationCount}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-amber-800">Update Frequency:</span>
-                      <span className="font-medium text-amber-900">Every 2 hours</span>
-                    </div>
+                <div className="text-xs pt-3 border-t border-amber-200 space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-amber-800">Grid Locations:</span>
+                    <span className="font-medium text-amber-900">{displayData?.length || 0}</span>
                   </div>
-                )}
+                  <div className="flex justify-between">
+                    <span className="text-amber-800">Weather Stations:</span>
+                    <span className="font-medium text-amber-900">{stationCount}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-amber-800">Update Schedule:</span>
+                    <span className="font-medium text-amber-900">Every 2 hours</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-amber-800">Processing Time:</span>
+                    <span className="font-medium text-amber-900">5-12 minutes</span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         </div>
+      </div>
       </div>
       
       <footer className="shadow-inner mt-16" style={{ backgroundColor: 'rgba(139, 69, 19, 0.9)' }}>
