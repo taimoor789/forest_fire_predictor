@@ -449,7 +449,6 @@ const FireRiskDashboard: React.FC = () => {
     const diffMs = now.getTime() - updated.getTime();
     const diffMinutes = Math.floor(diffMs / (1000 * 60));
     
-    if (diffMinutes < 2) return 'Updated moments ago';
     if (diffMinutes < 60) return `Updated ${diffMinutes} min ago`;
     
     const hours = Math.floor(diffMinutes / 60);
@@ -462,29 +461,26 @@ const FireRiskDashboard: React.FC = () => {
   };
   
   const getUpdateStatus = () => {
-    const now = new Date();
-    const currentHour = now.getHours();
-    const currentMinute = now.getMinutes();
-    
-    // Find the last scheduled 2-hour mark
-    const lastScheduledHour = Math.floor(currentHour / 2) * 2;
-    
-    // Calculate minutes since last scheduled update
-    const hoursSinceScheduled = currentHour - lastScheduledHour;
-    const minutesSinceScheduled = hoursSinceScheduled * 60 + currentMinute;
-    
-    // If we're within 12 minutes of a scheduled update, show "updating soon" message
-    if (minutesSinceScheduled <= 12 && loading) {
+    // If we're actively loading new data
+    if (loading) {
       return {
-        status: 'updating',
-        message: 'Processing latest data...'
+        status: 'loading',
+        message: 'Updating data...'
       };
     }
     
-    // Otherwise show normal status
+    // If there's an error
+    if (error) {
+      return {
+        status: 'error',
+        message: 'Connection issue'
+      };
+    }
+    
+    // Show the actual time since last update from API
     return {
-      status: loading ? 'loading' : error ? 'error' : 'updated',
-      message: error ? 'Connection issue' : getTimeAgo()
+      status: 'updated',
+      message: getTimeAgo()
     };
   };
   
@@ -548,7 +544,6 @@ const FireRiskDashboard: React.FC = () => {
                     <h2 className="text-xl font-semibold text-amber-900">Canada Fire Risk Map</h2>
                     <div className="flex items-center space-x-2">
                       <div className={`w-2.5 h-2.5 rounded-full shadow-sm ${
-                        updateStatus.status === 'updating' ? 'bg-blue-500 animate-pulse' :
                         updateStatus.status === 'loading' ? 'bg-yellow-500 animate-pulse' : 
                         updateStatus.status === 'error' ? 'bg-red-500' : 
                         'bg-green-500'
