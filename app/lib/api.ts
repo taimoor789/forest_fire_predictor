@@ -72,6 +72,7 @@ export interface FWIPredictionResponse {
     };
   };
   timestamp: string;
+  last_updated?: string;
 }
 
 //API service class for Fire Weather Index System
@@ -116,6 +117,9 @@ export class FireRiskAPI {
 
   static async getFireRiskPredictions(): Promise<FireRiskData[]> {
     const response = await this.fetchWithErrorHandling<FWIPredictionResponse>('/api/predict/fire-risk');
+
+    const batchTimestamp = (response as any).last_updated || response.timestamp;
+    console.log('🔥🔥🔥 BATCH TIMESTAMP:', batchTimestamp);
     
     console.log('🔥 FWI API RESPONSE:', response);
     console.log('🔥 Response data length:', response.data?.length);
@@ -207,7 +211,7 @@ export class FireRiskAPI {
         riskLevel: risk,
         location: item.location_name.trim(),
         province: item.province.trim(),
-        lastUpdated: item.last_updated || new Date().toISOString(),
+        lastUpdated: batchTimestamp,
         temperature: temp || 15,
         humidity: humidity || 60,
         windSpeed: windSpeed || 10,
@@ -225,6 +229,9 @@ export class FireRiskAPI {
           dsr: item.fire_weather_indices.dsr
         } : undefined
       });
+      if (transformedData.length === 1) {
+        console.log('🔥🔥🔥 FIRST RECORD lastUpdated:', transformedData[0].lastUpdated);
+      }
     });
 
     if (invalidItems.length > 0) {
@@ -249,6 +256,9 @@ export class FireRiskAPI {
     console.log(`   Valid items: ${transformedData.length}`);
     console.log(`   Final risk range: ${finalMin.toFixed(3)} - ${finalMax.toFixed(3)}`);
     console.log(`   Final average risk: ${finalAvg.toFixed(3)}`);
+
+    console.log('🔥🔥🔥 FINAL CHECK - First record lastUpdated:', transformedData[0]?.lastUpdated);
+    console.log('🔥🔥🔥 FINAL CHECK - Batch timestamp was:', batchTimestamp);
 
     return transformedData;
   }
@@ -349,6 +359,10 @@ export function useFireRiskData() {
         FireRiskAPI.getModelInfo().catch(() => null)
       ]);
 
+      console.log('📅📅📅 fireRiskData received, length:', fireRiskData.length);
+      console.log('📅📅📅 First record from API:', fireRiskData[0]);
+      console.log('📅📅📅 First record lastUpdated:', fireRiskData[0]?.lastUpdated);
+
       const validatedData = fireRiskData.filter(item => {
         const isValid = 
           typeof item.lat === 'number' && 
@@ -371,7 +385,17 @@ export function useFireRiskData() {
 
       setData(validatedData);
       setModelInfo(systemInfo);
-      setLastUpdated(new Date().toISOString());
+      
+      const apiTimestamp = validatedData.length > 0 && validatedData[0].lastUpdated 
+        ? validatedData[0].lastUpdated 
+        : null;
+      
+      console.log('📅📅📅 apiTimestamp selected:', apiTimestamp);
+      console.log('📅📅📅 About to call setLastUpdated with:', apiTimestamp);
+      
+      if (apiTimestamp) {
+        setLastUpdated(apiTimestamp);
+      }
 
       console.log(`Loaded ${validatedData.length} Fire Weather Index predictions`);
       if (systemInfo) {
@@ -453,7 +477,6 @@ export function useFireRiskData() {
 
   return {
     data, 
-    loading,
     error,
     lastUpdated,
     modelInfo,
