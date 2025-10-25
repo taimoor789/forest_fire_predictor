@@ -17,15 +17,6 @@ const getRiskColor = (riskLevel: number): string => {
   return '#388e3c';
 };
 
-const getRiskLabel = (riskLevel: number): string => {
-  const percentage = Math.round(riskLevel * 100);
-  if (riskLevel >= 0.8) return `Very High (${percentage}%)`;
-  if (riskLevel >= 0.6) return `High (${percentage}%)`;
-  if (riskLevel >= 0.4) return `Medium (${percentage}%)`;
-  if (riskLevel >= 0.2) return `Low (${percentage}%)`;
-  return `Very Low (${percentage}%)`;
-};
-
 const StatisticsPanel: React.FC<{ data: FireRiskData[]; modelInfo: any; loading: boolean; userLocation: { lat: number; lon: number; city?: string } | null }> = ({ data, modelInfo, loading, userLocation }) => {
   const stats = useMemo(() => {
     if (!data || data.length === 0) return { veryHigh: 0, high: 0, medium: 0, low: 0, veryLow: 0 };
@@ -362,51 +353,47 @@ const FireRiskDashboard: React.FC = () => {
   };
 
   useEffect(() => {
-    console.log('Requesting geolocation...');
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          console.log('Geolocation success:', position.coords);
-          const userLat = position.coords.latitude;
-          const userLon = position.coords.longitude;
-          setUserLocation({ lat: userLat, lon: userLon });
-          setLocationError(null);
-          
-          fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${userLat}&lon=${userLon}`)
-            .then(res => res.json())
-            .then(data => {
-              const city = data.address?.city || data.address?.town || data.address?.county || 'Your Location';
-              setUserLocation(prev => prev ? { ...prev, city } : null);
-            })
-            .catch(() => {
-              setUserLocation(prev => prev ? { ...prev, city: 'Your Location' } : null);
-            });
-        },
-        (error) => {
-          if (error && typeof error === 'object' && 'code' in error && error.code) {
-            console.error('Geolocation error:', error);
-            if (error.code === 1) {
-              setLocationError('Location access denied');
-            } else if (error.code === 2) {
-              setLocationError('Location unavailable');
-            } else if (error.code === 3) {
-              setLocationError('Location request timeout');
-            }
-          } else {
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const userLat = position.coords.latitude;
+        const userLon = position.coords.longitude;
+        setUserLocation({ lat: userLat, lon: userLon });
+        setLocationError(null);
+        
+        fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${userLat}&lon=${userLon}`)
+          .then(res => res.json())
+          .then(data => {
+            const city = data.address?.city || data.address?.town || data.address?.county || 'Your Location';
+            setUserLocation(prev => prev ? { ...prev, city } : null);
+          })
+          .catch(() => {
+            setUserLocation(prev => prev ? { ...prev, city: 'Your Location' } : null);
+          });
+      },
+      (error) => {
+        if (error && typeof error === 'object' && 'code' in error && error.code) {
+          console.error('Geolocation error:', error);
+          if (error.code === 1) {
             setLocationError('Location access denied');
+          } else if (error.code === 2) {
+            setLocationError('Location unavailable');
+          } else if (error.code === 3) {
+            setLocationError('Location request timeout');
           }
-        },
-        {
-          enableHighAccuracy: true,
-          timeout: 10000,
-          maximumAge: 0
+        } else {
+          // Timeout or other network error - don't clear previous location
+          console.warn('Geolocation error (no code):', error);
         }
-      );
-    } else {
-      console.log('Geolocation not supported');
-      setLocationError('Geolocation not supported');
-    }
-  }, []);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 30000,  // Increase from 10000 to 30000 (30 seconds)
+        maximumAge: 300000  // Cache location for 5 minutes
+      }
+    );
+  }
+ }, []);
 
   useEffect(() => {
     if (displayData && displayData.length > 0 && userLocation) {
@@ -439,59 +426,83 @@ const FireRiskDashboard: React.FC = () => {
     }
   }, [displayData, userLocation]);
 
-  const getTimeAgo = () => {
-    if (!lastUpdated) {
-      return 'Loading...';
-    }
-    
+  const [displayTime, setDisplayTime] = useState<string>(() => {
+  if (!lastUpdated) return '';
+  
+  const now = new Date();
+  const updated = new Date(lastUpdated);
+  
+  if (isNaN(updated.getTime())) return '';
+  
+  const diffMs = now.getTime() - updated.getTime();
+  const diffMinutes = Math.floor(diffMs / (1000 * 60));
+  
+  let message = '';
+  if (diffMinutes === 0) {
+    message = 'Just now';
+  } else if (diffMinutes < 60) {
+    message = `${diffMinutes} min ago`;
+  } else {
+    const hours = Math.floor(diffMinutes / 60);
+    const mins = diffMinutes % 60;
+    message = mins === 0 ? `${hours} hrs ago` : `${hours} hrs ${mins} min ago`;
+  }
+  
+  return message;
+ });
+
+ useEffect(() => {
+  if (!lastUpdated) return;
+  
+  const updateTime = () => {
     const now = new Date();
     const updated = new Date(lastUpdated);
+    
+    if (isNaN(updated.getTime())) return;
+    
     const diffMs = now.getTime() - updated.getTime();
     const diffMinutes = Math.floor(diffMs / (1000 * 60));
     
-    if (diffMinutes < 60) return `Updated ${diffMinutes} min ago`;
-    
-    const hours = Math.floor(diffMinutes / 60);
-    const minutes = diffMinutes % 60;
-    
-    if (hours === 1 && minutes === 0) return 'Updated 1 hour ago';
-    if (hours === 1) return `Updated 1 hr ${minutes} min ago`;
-    if (minutes === 0) return `Updated ${hours} hrs ago`;
-    return `Updated ${hours} hrs ${minutes} min ago`;
-  };
-  
-  const getUpdateStatus = () => {
-    // If we're actively loading new data
-    if (loading) {
-      return {
-        status: 'loading',
-        message: 'Updating data...'
-      };
+    let message = '';
+    if (diffMinutes === 0) {
+      message = 'Just now';
+    } else if (diffMinutes < 60) {
+      message = `${diffMinutes} min ago`;
+    } else {
+      const hours = Math.floor(diffMinutes / 60);
+      const mins = diffMinutes % 60;
+      message = mins === 0 ? `${hours} hrs ago` : `${hours} hrs ${mins} min ago`;
     }
     
-    // If there's an error
-    if (error) {
-      return {
-        status: 'error',
-        message: 'Connection issue'
-      };
-    }
-    
-    // Show the actual time since last update from API
-    return {
-      status: 'updated',
-      message: getTimeAgo()
-    };
+    setDisplayTime(message);
   };
-  
-  const updateStatus = getUpdateStatus();
 
-  const formatLastUpdated = (timestamp: string | null) => {
-    if (!timestamp) return new Date().toLocaleDateString('en-CA');
-    return new Date(timestamp).toLocaleDateString('en-CA', {
-      year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
-    });
+  updateTime();
+  const interval = setInterval(updateTime, 1000);
+  return () => clearInterval(interval);
+ }, [lastUpdated]);
+
+ const getUpdateStatus = () => {
+  if (loading) {
+    return { status: 'loading', message: 'Updating data...' };
+  }
+  
+  if (error) {
+    return { status: 'error', message: 'Connection issue' };
+  }
+  
+  if (!lastUpdated) {
+    return { status: 'updated', message: '' };
+  }
+  
+  return {
+    status: 'updated',
+    message: displayTime
   };
+ };
+ const updateStatus = getUpdateStatus();
+
+  
 
   return (
     <main className="min-h-screen" style={{ background: 'linear-gradient(135deg, #FFF8DC 0%, #FFE4B5 50%, #FFDAB9 100%)' }}>
@@ -549,7 +560,7 @@ const FireRiskDashboard: React.FC = () => {
                         'bg-green-500'
                       }`}></div>
                       <span className="text-xs text-amber-900 font-medium leading-none flex items-center h-2.5">
-                        {updateStatus.message}
+                        {updateStatus.message && `Updated ${updateStatus.message}`}
                       </span>
                     </div>
                   </div>
@@ -742,7 +753,7 @@ const FireRiskDashboard: React.FC = () => {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-amber-800">Update Schedule:</span>
-                    <span className="font-medium text-amber-900">Every 2 hours</span>
+                    <span className="font-medium text-amber-900">Every hour</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-amber-800">Processing Time:</span>
