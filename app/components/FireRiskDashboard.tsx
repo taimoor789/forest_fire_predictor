@@ -5,9 +5,11 @@ import { MapPin, Layers, AlertTriangle, TrendingUp, Database, ExternalLink } fro
 import MapComponent from './Map';
 import { useFireRiskData } from '../lib/api';
 import { FireRiskData } from '../types';
+import Image from 'next/image';
 
 const CACHE_KEY = 'fireRiskDataCache';
 const CACHE_TIMESTAMP_KEY = 'fireRiskDataCacheTimestamp';
+
 
 const getRiskColor = (riskLevel: number): string => {
   if (riskLevel >= 0.8) return '#d32f2f';
@@ -279,6 +281,7 @@ const FireRiskDashboard: React.FC = () => {
   const [nearestStations, setNearestStations] = useState<Array<{ station: FireRiskData; distance: number }>>([]);
   const [cachedData, setCachedData] = useState<FireRiskData[] | null>(null);
   const [showCachedWarning, setShowCachedWarning] = useState(false);
+  const [locationEnabled, setLocationEnabled] = useState(true);
 
   // Load cached data on mount
   useEffect(() => {
@@ -353,47 +356,115 @@ const FireRiskDashboard: React.FC = () => {
   };
 
   useEffect(() => {
-  if (navigator.geolocation) {
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const userLat = position.coords.latitude;
-        const userLon = position.coords.longitude;
-        setUserLocation({ lat: userLat, lon: userLon });
-        setLocationError(null);
-        
-        fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${userLat}&lon=${userLon}`)
-          .then(res => res.json())
-          .then(data => {
-            const city = data.address?.city || data.address?.town || data.address?.county || 'Your Location';
-            setUserLocation(prev => prev ? { ...prev, city } : null);
-          })
-          .catch(() => {
-            setUserLocation(prev => prev ? { ...prev, city: 'Your Location' } : null);
-          });
-      },
-      (error) => {
-        if (error && typeof error === 'object' && 'code' in error && error.code) {
-          console.error('Geolocation error:', error);
-          if (error.code === 1) {
-            setLocationError('Location access denied');
-          } else if (error.code === 2) {
-            setLocationError('Location unavailable');
-          } else if (error.code === 3) {
-            setLocationError('Location request timeout');
-          }
-        } else {
-          // Timeout or other network error - don't clear previous location
-          console.warn('Geolocation error (no code):', error);
-        }
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 30000,  // Increase from 10000 to 30000 (30 seconds)
-        maximumAge: 300000  // Cache location for 5 minutes
+  const checkLocationPermission = async () => {
+    if (!navigator.geolocation) {
+      setLocationError('Geolocation not supported');
+      setLocationEnabled(false);
+      return;
+    }
+
+    // Check if permissions API is available
+    if (navigator.permissions && navigator.permissions.query) {
+      try {
+        const result = await navigator.permissions.query({ name: 'geolocation' });
+        setLocationEnabled(result.state === 'granted');
+      } catch (err) {
+        console.warn('Could not query permissions:', err);
       }
-    );
+    }
+  };
+
+  checkLocationPermission();
+
+  // Listen for permission changes (if supported)
+  if (navigator.permissions) {
+    navigator.permissions.query({ name: 'geolocation' }).then(permissionStatus => {
+      permissionStatus.addEventListener('change', () => {
+        checkLocationPermission();
+      });
+    }).catch(() => {
+      console.warn('Permission monitoring not available');
+    });
   }
- }, []);
+}, []);
+
+// Replace your existing geolocation useEffect with this:
+useEffect(() => {
+  const getLocationFromIP = async () => {
+    try {
+      const response = await fetch('https://ip-api.com/json/?fields=lat,lon,city,status');
+      const data = await response.json();
+      
+      if (data.status === 'success') {
+        setUserLocation({
+          lat: data.lat,
+          lon: data.lon,
+          city: data.city || 'Your Location'
+        });
+        setLocationError(null);
+        console.log('Using IP-based location:', data.city);
+      } else {
+        console.warn('IP geolocation failed:', data.message);
+        setLocationError('Location service unavailable');
+      }
+    } catch (err) {
+      console.error('IP geolocation error:', err);
+      setLocationError('Could not determine location');
+    }
+  };
+
+  if (!navigator.geolocation) {
+    console.warn('Geolocation not supported, trying IP-based location');
+    getLocationFromIP();
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      const userLat = position.coords.latitude;
+      const userLon = position.coords.longitude;
+      setUserLocation({ lat: userLat, lon: userLon });
+      setLocationError(null);
+      
+      const geoTimeout = setTimeout(() => {
+        console.warn('Reverse geocoding timeout');
+        setUserLocation(prev => prev ? { ...prev, city: 'Your Location' } : null);
+      }, 5000);
+      
+      fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${userLat}&lon=${userLon}`, {
+        headers: { 'User-Agent': 'FireRiskDashboard/1.0' }
+      })
+        .then(res => res.json())
+        .then(data => {
+          clearTimeout(geoTimeout);
+          const city = data.address?.city || data.address?.town || data.address?.county || 'Your Location';
+          setUserLocation(prev => prev ? { ...prev, city } : null);
+        })
+        .catch(() => {
+          clearTimeout(geoTimeout);
+          setUserLocation(prev => prev ? { ...prev, city: 'Your Location' } : null);
+        });
+    },
+    (error) => {
+      if (error?.code === 1) {
+        console.warn('Location permission denied');
+        setLocationEnabled(false);
+        getLocationFromIP();
+      } else if (error?.code === 2 || error?.code === 3) {
+        console.warn('Geolocation temporarily unavailable');
+        setLocationError('Location service temporarily unavailable');
+      } else {
+        console.warn('Geolocation error, trying IP-based location');
+        getLocationFromIP();
+      }
+    },
+    {
+      enableHighAccuracy: false,
+      timeout: 8000,
+      maximumAge: 300000
+    }
+  );
+ }, [locationEnabled]);
 
   useEffect(() => {
     if (displayData && displayData.length > 0 && userLocation) {
@@ -426,59 +497,42 @@ const FireRiskDashboard: React.FC = () => {
     }
   }, [displayData, userLocation]);
 
-  const [displayTime, setDisplayTime] = useState<string>(() => {
-  if (!lastUpdated) return '';
+  const calculateDisplayTime = (lastUpdatedTime: string | null): string => {
+  if (!lastUpdatedTime) return '';
   
   const now = new Date();
-  const updated = new Date(lastUpdated);
+  const updated = new Date(lastUpdatedTime);
   
   if (isNaN(updated.getTime())) return '';
   
   const diffMs = now.getTime() - updated.getTime();
   const diffMinutes = Math.floor(diffMs / (1000 * 60));
   
-  let message = '';
   if (diffMinutes === 0) {
-    message = 'Just now';
+    return 'Just now';
   } else if (diffMinutes < 60) {
-    message = `${diffMinutes} min ago`;
+    return `${diffMinutes} min${diffMinutes === 1 ? '' : 's'} ago`;
   } else {
     const hours = Math.floor(diffMinutes / 60);
     const mins = diffMinutes % 60;
-    message = mins === 0 ? `${hours} hrs ago` : `${hours} hrs ${mins} min ago`;
+    if (mins === 0) {
+      return `${hours} hr${hours === 1 ? '' : 's'} ago`;
+    }
+    return `${hours} hr${hours === 1 ? '' : 's'} ${mins} min${mins === 1 ? '' : 's'} ago`;
   }
-  
-  return message;
- });
+ };
+
+ const [displayTime, setDisplayTime] = useState<string>(() => calculateDisplayTime(lastUpdated));
 
  useEffect(() => {
+  setDisplayTime(calculateDisplayTime(lastUpdated));
+  
   if (!lastUpdated) return;
   
-  const updateTime = () => {
-    const now = new Date();
-    const updated = new Date(lastUpdated);
-    
-    if (isNaN(updated.getTime())) return;
-    
-    const diffMs = now.getTime() - updated.getTime();
-    const diffMinutes = Math.floor(diffMs / (1000 * 60));
-    
-    let message = '';
-    if (diffMinutes === 0) {
-      message = 'Just now';
-    } else if (diffMinutes < 60) {
-      message = `${diffMinutes} min ago`;
-    } else {
-      const hours = Math.floor(diffMinutes / 60);
-      const mins = diffMinutes % 60;
-      message = mins === 0 ? `${hours} hrs ago` : `${hours} hrs ${mins} min ago`;
-    }
-    
-    setDisplayTime(message);
-  };
-
-  updateTime();
-  const interval = setInterval(updateTime, 1000);
+  const interval = setInterval(() => {
+    setDisplayTime(calculateDisplayTime(lastUpdated));
+  }, 1000);
+  
   return () => clearInterval(interval);
  }, [lastUpdated]);
 
@@ -502,7 +556,6 @@ const FireRiskDashboard: React.FC = () => {
  };
  const updateStatus = getUpdateStatus();
 
-  
 
   return (
     <main className="min-h-screen" style={{ background: 'linear-gradient(135deg, #FFF8DC 0%, #FFE4B5 50%, #FFDAB9 100%)' }}>
@@ -523,28 +576,41 @@ const FireRiskDashboard: React.FC = () => {
           background: rgba(218, 165, 32, 0.7);
         }
       `}</style>
+
       <header className="shadow-md backdrop-blur-sm" style={{ backgroundColor: 'rgba(255, 218, 155, 0.7)', borderBottom: '2px solid rgba(218, 165, 32, 0.4)' }}>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="text-center">
-            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight mb-4" style={{ color: '#8B4513', textShadow: '2px 2px 4px rgba(0,0,0,0.1)' }}>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-2 pb-3">
+          {/* Logo in top left */}
+          <div className="mb-3 flex items-center" style={{ marginLeft: '-4rem' }}>
+            <Image 
+              src="/assets/logo/ffp-logo.svg" 
+              alt="FFP Logo" 
+              width={180}
+              height={50}
+              className="h-16 w-auto"
+              priority
+              style={{ filter: 'drop-shadow(2px 2px 4px rgba(0,0,0,0.1))' }}
+            />
+          </div>
+
+          {/* Centered title and subtitle */}
+          <div className="text-center -mt-6">
+            <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight mb-5" style={{ color: '#8B4513', textShadow: '2px 2px 4px rgba(0,0,0,0.1)' }}>
               Forest Fire Risk Predictor
             </h1>
-            <p className="text-base sm:text-lg max-w-3xl mx-auto font-medium" style={{ color: '#A0522D' }}>
+            
+            <p className="text-sm sm:text-base font-medium max-w-3xl mx-auto mb-2" style={{ color: '#A0522D' }}>
               Real-time fire risk monitoring across Canada
             </p>
-            <div className="mt-6 flex items-center justify-center space-x-2">
-              <Database className="w-5 h-5 text-amber-800" />
-              <span className="text-sm text-amber-800">Environment and Climate Change Canada Data</span>
-            </div>
+            
             {showCachedWarning && (
-              <div className="mt-4 inline-block bg-yellow-100 border border-yellow-300 rounded px-3 py-1 text-xs text-yellow-800">
+              <div className="inline-block bg-yellow-100 border border-yellow-300 rounded px-3 py-1 text-xs text-yellow-800">
                 Showing cached data - refreshing...
               </div>
             )}
           </div>
         </div> 
       </header>
-      
+            
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
           <div className="lg:col-span-3 space-y-6">
@@ -554,11 +620,13 @@ const FireRiskDashboard: React.FC = () => {
                   <div className="flex items-center gap-4">
                     <h2 className="text-xl font-semibold text-amber-900">Canada Fire Risk Map</h2>
                     <div className="flex items-center space-x-2">
-                      <div className={`w-2.5 h-2.5 rounded-full shadow-sm ${
-                        updateStatus.status === 'loading' ? 'bg-yellow-500 animate-pulse' : 
-                        updateStatus.status === 'error' ? 'bg-red-500' : 
-                        'bg-green-500'
-                      }`}></div>
+                      {displayTime && (
+                        <div className={`w-2.5 h-2.5 rounded-full shadow-sm ${
+                          updateStatus.status === 'loading' ? 'bg-yellow-500 animate-pulse' : 
+                          updateStatus.status === 'error' ? 'bg-red-500' : 
+                          'bg-green-500'
+                        }`}></div>
+                      )}
                       <span className="text-xs text-amber-900 font-medium leading-none flex items-center h-2.5">
                         {updateStatus.message && `Updated ${updateStatus.message}`}
                       </span>
@@ -754,10 +822,6 @@ const FireRiskDashboard: React.FC = () => {
                   <div className="flex justify-between">
                     <span className="text-amber-800">Update Schedule:</span>
                     <span className="font-medium text-amber-900">Every hour</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-amber-800">Processing Time:</span>
-                    <span className="font-medium text-amber-900">5-12 minutes</span>
                   </div>
                 </div>
               </div>
