@@ -1,7 +1,10 @@
 import { FireRiskData, ApiError as ApiErrorInterface} from "../types";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef} from "react";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+const CACHE_KEY = 'fireRiskDataCache';
+const CACHE_TIMESTAMP_KEY = 'fireRiskDataCacheTimestamp';
 
 // Enhanced interface for Fire Weather Index response
 export interface FWIPredictionResponse {
@@ -115,24 +118,18 @@ export class FireRiskAPI {
     }
   }
 
-  static async getFireRiskPredictions(): Promise<FireRiskData[]> {
+  static async getFireRiskPredictions(): Promise<{ data: FireRiskData[], batchTimestamp: string }> {
+    
     const response = await this.fetchWithErrorHandling<FWIPredictionResponse>('/api/predict/fire-risk');
 
     const batchTimestamp = (response as any).last_updated || response.timestamp;
-    console.log('🔥🔥🔥 BATCH TIMESTAMP:', batchTimestamp);
-    
-    console.log('🔥 FWI API RESPONSE:', response);
-    console.log('🔥 Response data length:', response.data?.length);
-    console.log('🔥 Processing stats:', response.processing_stats);
-    console.log('🔥 Model info:', response.model_info);
 
     if (!response.data || !Array.isArray(response.data)) {
       throw new ApiError('INVALID_RESPONSE', 'API response missing or invalid data array');
     }
 
     if (response.data.length === 0) {
-      console.warn('⚠️ Fire Weather Index API returned empty data array');
-      return [];
+      return { data: [], batchTimestamp };
     }
 
     const risks = response.data
@@ -141,24 +138,6 @@ export class FireRiskAPI {
     
     if (risks.length === 0) {
       throw new ApiError('NO_VALID_RISKS', 'No valid risk values in FWI response');
-    }
-
-    const minRisk = Math.min(...risks);
-    const maxRisk = Math.max(...risks);
-    const avgRisk = risks.reduce((a, b) => a + b, 0) / risks.length;
-
-    console.log('🔥 FIRE WEATHER INDEX DATA ANALYSIS:');
-    console.log(`   System: ${response.model_info.model_type}`);
-    console.log(`   Methodology: ${response.model_info.methodology}`);
-    console.log(`   Total locations: ${response.data.length}`);
-    console.log(`   Valid risks: ${risks.length}`);
-    console.log(`   Risk range: ${minRisk.toFixed(3)} - ${maxRisk.toFixed(3)}`);
-    console.log(`   Average risk: ${avgRisk.toFixed(3)}`);
-    
-    if (response.processing_stats) {
-      const stats = response.processing_stats.risk_statistics;
-      console.log(`   Danger classes: VL=${stats.very_low_count}, L=${stats.low_count}, M=${stats.moderate_count}, H=${stats.high_count}, VH=${stats.very_high_count}, E=${stats.extreme_count}`);
-      console.log(`   Processing time: ${response.processing_stats.processing_time_seconds.toFixed(1)}s`);
     }
 
     const transformedData: FireRiskData[] = [];
@@ -194,16 +173,6 @@ export class FireRiskAPI {
       const humidity = item.weather_features?.humidity;
       const windSpeed = item.weather_features?.wind_speed;
 
-      if (temp && (temp < -60 || temp > 60)) {
-        console.warn(`⚠️ Extreme temperature for ${item.location_name}: ${temp}°C`);
-      }
-      if (humidity && (humidity < 0 || humidity > 100)) {
-        console.warn(`⚠️ Invalid humidity for ${item.location_name}: ${humidity}%`);
-      }
-      if (windSpeed && (windSpeed < 0 || windSpeed > 200)) {
-        console.warn(`⚠️ Extreme wind speed for ${item.location_name}: ${windSpeed} km/h`);
-      }
-
       transformedData.push({
         id: `fwi_${lat}_${lon}`,
         lat,
@@ -211,7 +180,6 @@ export class FireRiskAPI {
         riskLevel: risk,
         location: item.location_name.trim(),
         province: item.province.trim(),
-        lastUpdated: batchTimestamp,
         temperature: temp || 15,
         humidity: humidity || 60,
         windSpeed: windSpeed || 10,
@@ -229,38 +197,16 @@ export class FireRiskAPI {
           dsr: item.fire_weather_indices.dsr
         } : undefined
       });
-      if (transformedData.length === 1) {
-        console.log('🔥🔥🔥 FIRST RECORD lastUpdated:', transformedData[0].lastUpdated);
-      }
     });
-
-    if (invalidItems.length > 0) {
-      console.error(`🚨 ${invalidItems.length} invalid FWI items found:`, invalidItems.slice(0, 5));
-    }
 
     if (transformedData.length === 0) {
       throw new ApiError('NO_VALID_DATA', 'No valid Fire Weather Index data after transformation');
     }
 
-    const rejectionRate = (invalidItems.length / response.data.length) * 100;
-    if (rejectionRate > 10) {
-      console.error(`🚨 HIGH REJECTION RATE: ${rejectionRate.toFixed(1)}% of FWI data rejected`);
-    }
-
-    const finalRisks = transformedData.map(d => d.riskLevel);
-    const finalMin = Math.min(...finalRisks);
-    const finalMax = Math.max(...finalRisks);
-    const finalAvg = finalRisks.reduce((a, b) => a + b, 0) / finalRisks.length;
-
-    console.log('🔥 FINAL FIRE WEATHER INDEX DATA:');
-    console.log(`   Valid items: ${transformedData.length}`);
-    console.log(`   Final risk range: ${finalMin.toFixed(3)} - ${finalMax.toFixed(3)}`);
-    console.log(`   Final average risk: ${finalAvg.toFixed(3)}`);
-
-    console.log('🔥🔥🔥 FINAL CHECK - First record lastUpdated:', transformedData[0]?.lastUpdated);
-    console.log('🔥🔥🔥 FINAL CHECK - Batch timestamp was:', batchTimestamp);
-
-    return transformedData;
+    return {
+      data: transformedData,
+      batchTimestamp: batchTimestamp.split('.')[0] + 'Z' 
+    };
   }
 
   static async getModelInfo(): Promise<{
@@ -349,19 +295,44 @@ export function useFireRiskData() {
     confidence: string;
   } | null>(null);
 
+  const prevDataRef = useRef<FireRiskData[] | null>(null);
+  const [cachedData, setCachedData] = useState<FireRiskData[] | null>(null);
+  const [showCachedWarning, setShowCachedWarning] = useState(false);
+
+  // Load cached data on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const cached = localStorage.getItem(CACHE_KEY);
+      const cacheTime = localStorage.getItem(CACHE_TIMESTAMP_KEY);
+      if (cached) {
+        try {
+          const parsedData = JSON.parse(cached);
+          setCachedData(parsedData);
+          setData(parsedData);
+          setLoading(false);
+          if (cacheTime) {
+            const age = Date.now() - parseInt(cacheTime);
+            if (age > 2 * 60 * 60 * 1000) {
+              setShowCachedWarning(true);
+            }
+          }
+        } catch (e) {
+          console.error('Failed to parse cached data:', e);
+        }
+      }
+    }
+  }, []);
+
   const fetchData = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      const [fireRiskData, systemInfo] = await Promise.all([
-        FireRiskAPI.getFireRiskPredictions(),
-        FireRiskAPI.getModelInfo().catch(() => null)
-      ]);
+      const fireRiskResponse = await FireRiskAPI.getFireRiskPredictions();
+      const systemInfo = await FireRiskAPI.getModelInfo().catch(() => null);
 
-      console.log('📅📅📅 fireRiskData received, length:', fireRiskData.length);
-      console.log('📅📅📅 First record from API:', fireRiskData[0]);
-      console.log('📅📅📅 First record lastUpdated:', fireRiskData[0]?.lastUpdated);
+      const fireRiskData = fireRiskResponse.data;
+      const backendTimestamp = fireRiskResponse.batchTimestamp;
 
       const validatedData = fireRiskData.filter(item => {
         const isValid = 
@@ -383,27 +354,54 @@ export function useFireRiskData() {
         throw new Error('No valid Fire Weather Index data received from API');
       }
 
-      setData(validatedData);
-      setModelInfo(systemInfo);
-      
-      const apiTimestamp = validatedData.length > 0 && validatedData[0].lastUpdated 
-        ? validatedData[0].lastUpdated 
-        : null;
-      
-      console.log('📅📅📅 apiTimestamp selected:', apiTimestamp);
-      console.log('📅📅📅 About to call setLastUpdated with:', apiTimestamp);
-      
-      if (apiTimestamp) {
-        setLastUpdated(apiTimestamp);
+      // Cache data with compression (only essential fields)
+      if (typeof window !== 'undefined') {
+        try {
+          const compressedData = validatedData.map(item => ({
+            id: item.id,
+            lat: item.lat,
+            lon: item.lon,
+            riskLevel: item.riskLevel,
+            location: item.location,
+            province: item.province,
+            temperature: item.temperature,
+            humidity: item.humidity,
+            windSpeed: item.windSpeed
+          }));
+          
+          const dataString = JSON.stringify(compressedData);
+          
+          if (dataString.length < 4 * 1024 * 1024) {
+            localStorage.setItem(CACHE_KEY, dataString);
+            localStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString());
+            setCachedData(validatedData);
+            setShowCachedWarning(false);
+          } else {
+            console.warn('Data too large to cache, skipping localStorage');
+          }
+        } catch (e) {
+          if (e instanceof Error && e.name === 'QuotaExceededError') {
+            console.warn('localStorage quota exceeded, clearing old cache');
+            localStorage.removeItem(CACHE_KEY);
+            localStorage.removeItem(CACHE_TIMESTAMP_KEY);
+          } else {
+            console.error('Failed to cache data:', e);
+          }
+        }
       }
 
-      console.log(`Loaded ${validatedData.length} Fire Weather Index predictions`);
-      if (systemInfo) {
-        console.log(`System: ${systemInfo.modelType}`);
-        console.log(`Methodology: ${systemInfo.methodology}`);
-        console.log(`Confidence: ${systemInfo.confidence}`);
-        console.log(`Risk range: ${systemInfo.riskRange[0].toFixed(3)} - ${systemInfo.riskRange[1].toFixed(3)}`);
+      if (!lastUpdated || backendTimestamp !== lastUpdated) {
+        console.log('✅ New data from backend, updating lastUpdated to:', backendTimestamp);
+        setLastUpdated(backendTimestamp);
+      } else {
+        console.log('ℹ️ Same backend data, lastUpdated stays:', lastUpdated);
       }
+
+      setData(validatedData);
+      setModelInfo(systemInfo);
+      prevDataRef.current = validatedData;
+
+      console.log(`Loaded ${validatedData.length} Fire Weather Index predictions`);
     } catch (err) {
       console.error('Failed to fetch Fire Weather Index predictions:', err);
       setError(err instanceof ApiError ? err.message : 'Failed to load Fire Weather Index predictions');
@@ -426,47 +424,25 @@ export function useFireRiskData() {
 
     const getNextUpdateTime = () => {
       const now = new Date();
-      const currentHour = now.getHours();
-      const currentMinute = now.getMinutes();
-      
-      let nextHour = Math.ceil(currentHour / 2) * 2;
-      let nextDay = 0;
-      
-      if (nextHour >= 24) {
-        nextHour = 0;
-        nextDay = 1;
-      }
-      
       const nextUpdate = new Date();
-      nextUpdate.setDate(now.getDate() + nextDay);
-      nextUpdate.setHours(nextHour, 0, 0, 0);
-      
-      if (nextHour === currentHour && currentMinute > 5) {
-        nextUpdate.setHours(nextHour + 2, 0, 0, 0);
-        if (nextUpdate.getHours() >= 24) {
-          nextUpdate.setDate(nextUpdate.getDate() + 1);
-          nextUpdate.setHours(0, 0, 0, 0);
-        }
-      }
-      
+      nextUpdate.setHours(nextUpdate.getHours() + 1, 0, 0, 0);
       return nextUpdate.getTime() - now.getTime();
     };
 
     const timeUntilNext = getNextUpdateTime();
-    
     console.log(`Next Fire Weather Index update in ${Math.round(timeUntilNext / (1000 * 60))} minutes`);
 
     const initialTimeout = setTimeout(() => {
       fetchData();
       
-      const twoHourInterval = setInterval(() => {
-        console.log('Fetching scheduled Fire Weather Index update...');
+      const hourlyInterval = setInterval(() => {
+        console.log('Fetching hourly Fire Weather Index update...');
         fetchData();
-      }, 2 * 60 * 60 * 1000);
+      }, 60 * 60 * 1000);
       
       return () => {
         console.log('Cleaning up Fire Weather Index update interval');
-        clearInterval(twoHourInterval);
+        clearInterval(hourlyInterval);
       };
     }, timeUntilNext);
 
@@ -475,10 +451,13 @@ export function useFireRiskData() {
     };
   }, []);
 
+  const displayData = data && data.length > 0 ? data : cachedData;
+
   return {
-    data, 
+    data: displayData,
+    loading,
     error,
-    lastUpdated,
+    lastUpdated,  
     modelInfo,
     refetch: fetchData
   };
@@ -486,7 +465,7 @@ export function useFireRiskData() {
 
 export const config = {
   apiUrl: API_BASE_URL,
-  refreshInterval: 2 * 60 * 60 * 1000,
+  refreshInterval: 60 * 60 * 1000, 
   maxRetries: 3,
   retryDelay: 1000,
   systemType: "Canadian Fire Weather Index System"

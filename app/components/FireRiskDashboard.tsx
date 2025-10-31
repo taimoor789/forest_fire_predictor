@@ -271,7 +271,7 @@ const FireRiskDashboard: React.FC = () => {
  useEffect(() => {
   const getLocationFromIP = async () => {
     try {
-      const response = await fetch('https://geo.ipify.org/api/v2/country?apiKey=at_gEJtHyIl0V8krvwb0uFlPqJhWZ5p0');
+      const response = await fetch(`https://geo.ipify.org/api/v2/country?apiKey=${process.env.NEXT_PUBLIC_GEO_API_KEY}`);
       const data = await response.json();
       
       if (data.location) {
