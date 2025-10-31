@@ -1,27 +1,20 @@
 "use client";
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { MapPin, Layers, AlertTriangle, TrendingUp, Database, ExternalLink } from 'lucide-react';
+import { MapPin, Layers, AlertTriangle, TrendingUp, ExternalLink } from 'lucide-react';
 import MapComponent from './Map';
 import { useFireRiskData } from '../lib/api';
 import { FireRiskData } from '../types';
 import Image from 'next/image';
+import { CANADIAN_STATIONS } from '../lib/constants/stations';
+import { getRiskColor } from '../lib/utils/colours';
+import { calculateDistance } from '../lib/utils/geo';
+import { theme } from '../lib/constants/theme';
 
-const CACHE_KEY = 'fireRiskDataCache';
-const CACHE_TIMESTAMP_KEY = 'fireRiskDataCacheTimestamp';
 
-
-const getRiskColor = (riskLevel: number): string => {
-  if (riskLevel >= 0.8) return '#d32f2f';
-  if (riskLevel >= 0.6) return '#f57c00';
-  if (riskLevel >= 0.4) return '#fbc02d';
-  if (riskLevel >= 0.2) return '#689f38';
-  return '#388e3c';
-};
-
-const StatisticsPanel: React.FC<{ data: FireRiskData[]; modelInfo: any; loading: boolean; userLocation: { lat: number; lon: number; city?: string } | null }> = ({ data, modelInfo, loading, userLocation }) => {
+const StatisticsPanel: React.FC<{ data: FireRiskData[]; modelInfo: any; shouldShowSkeleton: boolean; userLocation: { lat: number; lon: number; city?: string } | null }> = ({ data, modelInfo, shouldShowSkeleton, userLocation }) => {
   const stats = useMemo(() => {
-    if (!data || data.length === 0) return { veryHigh: 0, high: 0, medium: 0, low: 0, veryLow: 0 };
+    if (!data || data.length === 0) return { veryHigh: 0, high: 0, medium: 0, low: 0, veryLow: 0 }; 
     return {
       veryHigh: data.filter(d => d.riskLevel >= 0.8).length,
       high: data.filter(d => d.riskLevel >= 0.6 && d.riskLevel < 0.8).length,
@@ -39,19 +32,19 @@ const StatisticsPanel: React.FC<{ data: FireRiskData[]; modelInfo: any; loading:
       </div>
       <div className="grid grid-cols-2 gap-4 mb-4">
         <div className="text-center p-3 bg-red-50 rounded-lg border border-red-200 shadow-sm">
-          <div className="text-2xl font-bold text-red-600">{loading ? '...' : stats.veryHigh}</div>
+          <div className="text-2xl font-bold text-red-600">{shouldShowSkeleton ? '...' : stats.veryHigh}</div>
           <div className="text-sm text-red-800">Very High</div>
         </div>
         <div className="text-center p-3 bg-orange-50 rounded-lg border border-orange-200 shadow-sm">
-          <div className="text-2xl font-bold text-orange-600">{loading ? '...' : stats.high}</div>
+          <div className="text-2xl font-bold text-orange-600">{shouldShowSkeleton ? '...' : stats.high}</div>
           <div className="text-sm text-orange-800">High</div>
         </div>
         <div className="text-center p-3 bg-yellow-50 rounded-lg border border-yellow-200 shadow-sm">
-          <div className="text-2xl font-bold text-yellow-700">{loading ? '...' : stats.medium}</div>
+          <div className="text-2xl font-bold text-yellow-700">{shouldShowSkeleton ? '...' : stats.medium}</div>
           <div className="text-sm text-yellow-800">Medium</div>
         </div>
         <div className="text-center p-3 bg-green-50 rounded-lg border border-green-200 shadow-sm">
-          <div className="text-2xl font-bold text-green-600">{loading ? '...' : stats.low + stats.veryLow}</div>
+          <div className="text-2xl font-bold text-green-600">{shouldShowSkeleton ? '...' : stats.low + stats.veryLow}</div>
           <div className="text-sm text-green-800">Low</div>
         </div>
       </div>
@@ -115,61 +108,11 @@ const HeatmapLegend: React.FC = () => (
   </div>
 );
 
-const HighRiskAreas: React.FC<{ data: FireRiskData[]; loading: boolean }> = ({ data, loading }) => {
+const HighRiskAreas: React.FC<{ data: FireRiskData[]; shouldShowSkeleton: boolean }> = ({ data, shouldShowSkeleton }) => {
   const recentAlerts = useMemo(() => {
     if (!data || data.length === 0) return [];
     
-    const stations = [
-      { name: "Vancouver", lat: 49.2827, lon: -123.1207, province: "BC" },
-      { name: "Kelowna", lat: 49.8880, lon: -119.4960, province: "BC" },
-      { name: "Kamloops", lat: 50.6745, lon: -120.3273, province: "BC" },
-      { name: "Calgary", lat: 51.0447, lon: -114.0719, province: "AB" },
-      { name: "Edmonton", lat: 53.5461, lon: -113.4938, province: "AB" },
-      { name: "Fort McMurray", lat: 56.7266, lon: -111.3790, province: "AB" },
-      { name: "Saskatoon", lat: 52.1579, lon: -106.6702, province: "SK" },
-      { name: "Regina", lat: 50.4452, lon: -104.6189, province: "SK" },
-      { name: "Winnipeg", lat: 49.8951, lon: -97.1384, province: "MB" },
-      { name: "Thunder Bay", lat: 48.3809, lon: -89.2477, province: "ON" },
-      { name: "Ottawa", lat: 45.4215, lon: -75.6972, province: "ON" },
-      { name: "Toronto", lat: 43.6510, lon: -79.3470, province: "ON" },
-      { name: "Sudbury", lat: 46.4917, lon: -80.9930, province: "ON" },
-      { name: "Montreal", lat: 45.5019, lon: -73.5674, province: "QC" },
-      { name: "Quebec City", lat: 46.8139, lon: -71.2080, province: "QC" },
-      { name: "Halifax", lat: 44.6488, lon: -63.5752, province: "NS" },
-      { name: "Whitehorse", lat: 60.7212, lon: -135.0568, province: "YT" },
-      { name: "Yellowknife", lat: 62.4540, lon: -114.3718, province: "NT" },
-      { name: "Prince George", lat: 53.9171, lon: -122.7497, province: "BC" },
-      { name: "Victoria", lat: 48.4284, lon: -123.3656, province: "BC" },
-      { name: "Smithers", lat: 54.7800, lon: -127.1743, province: "BC" },
-      { name: "Dease Lake", lat: 58.4356, lon: -130.0089, province: "BC" },
-      { name: "Fort St. John", lat: 56.2524, lon: -120.8466, province: "BC" },
-      { name: "High Level", lat: 58.5169, lon: -117.1360, province: "AB" },
-      { name: "Peace River", lat: 56.2333, lon: -117.2833, province: "AB" },
-      { name: "La Ronge", lat: 55.1000, lon: -105.3000, province: "SK" },
-      { name: "Flin Flon", lat: 54.7682, lon: -101.8779, province: "MB" },
-      { name: "Churchill", lat: 58.7684, lon: -94.1650, province: "MB" },
-      { name: "Moosonee", lat: 51.2794, lon: -80.6463, province: "ON" },
-      { name: "Timmins", lat: 48.4758, lon: -81.3305, province: "ON" },
-      { name: "Val-d'Or", lat: 48.1086, lon: -77.7972, province: "QC" },
-      { name: "Chibougamau", lat: 49.9167, lon: -74.3667, province: "QC" },
-      { name: "Schefferville", lat: 54.8000, lon: -66.8167, province: "QC" },
-      { name: "Goose Bay", lat: 53.3019, lon: -60.3267, province: "NL" },
-      { name: "St. John's", lat: 47.5615, lon: -52.7126, province: "NL" },
-      { name: "Iqaluit", lat: 63.7467, lon: -68.5170, province: "NU" },
-      { name: "Rankin Inlet", lat: 62.8090, lon: -92.0853, province: "NU" },
-      { name: "Cambridge Bay", lat: 69.1167, lon: -105.0667, province: "NU" }
-    ];
-
-    const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
-      const R = 6371;
-      const dLat = (lat2 - lat1) * Math.PI / 180;
-      const dLon = (lon2 - lon1) * Math.PI / 180;
-      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
-              Math.sin(dLon/2) * Math.sin(dLon/2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-      return R * c;
-    };
+    const stations = CANADIAN_STATIONS;
 
     const stationGroups = new Map<string, FireRiskData[]>();
     stations.forEach(station => stationGroups.set(station.name, []));
@@ -242,7 +185,7 @@ const HighRiskAreas: React.FC<{ data: FireRiskData[]; loading: boolean }> = ({ d
         <h3 className="text-lg font-semibold text-amber-900">High Risk Areas</h3>
       </div>
       <div className="space-y-3">
-        {loading ? <div className="text-center text-amber-700 py-4">Loading...</div> : 
+        {shouldShowSkeleton ? <div className="text-center text-amber-700 py-4">Loading...</div> : 
         recentAlerts.length > 0 ? recentAlerts.map(alert => (
           <div key={alert.id} className={`flex items-start space-x-3 p-3 rounded-lg border-l-4 shadow-sm ${
             alert.color === 'red' ? 'bg-red-50 border-red-500' : 
@@ -273,80 +216,19 @@ const HighRiskAreas: React.FC<{ data: FireRiskData[]; loading: boolean }> = ({ d
 
 const FireRiskDashboard: React.FC = () => {
   const { data, loading, error, lastUpdated, modelInfo } = useFireRiskData();
+  const shouldShowSkeleton = loading && (!data || data.length === 0);
+  
   const [mapMode, setMapMode] = useState<'markers' | 'heatmap'>('markers');
   const [stationCount, setStationCount] = useState<number>(0);
   const [pendingMode, setPendingMode] = useState<'markers' | 'heatmap' | null>(null);
   const [userLocation, setUserLocation] = useState<{ lat: number; lon: number; city?: string } | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [nearestStations, setNearestStations] = useState<Array<{ station: FireRiskData; distance: number }>>([]);
-  const [cachedData, setCachedData] = useState<FireRiskData[] | null>(null);
-  const [showCachedWarning, setShowCachedWarning] = useState(false);
   const [locationEnabled, setLocationEnabled] = useState(true);
 
-  // Load cached data on mount
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const cached = localStorage.getItem(CACHE_KEY);
-      const cacheTime = localStorage.getItem(CACHE_TIMESTAMP_KEY);
-      if (cached) {
-        try {
-          const parsedData = JSON.parse(cached);
-          setCachedData(parsedData);
-          if (cacheTime) {
-            const age = Date.now() - parseInt(cacheTime);
-            if (age > 2 * 60 * 60 * 1000) {
-              setShowCachedWarning(true);
-            }
-          }
-        } catch (e) {
-          console.error('Failed to parse cached data:', e);
-        }
-      }
-    }
-  }, []);
-
-  // Cache data when it updates (store only essential fields to save space)
-  useEffect(() => {
-    if (data && data.length > 0 && typeof window !== 'undefined') {
-      try {
-        // Compress data by storing only essential fields
-        const compressedData = data.map(item => ({
-          id: item.id,
-          lat: item.lat,
-          lon: item.lon,
-          riskLevel: item.riskLevel,
-          location: item.location,
-          province: item.province,
-          temperature: item.temperature,
-          humidity: item.humidity,
-          windSpeed: item.windSpeed
-        }));
-        
-        const dataString = JSON.stringify(compressedData);
-        
-        // Check if data size is reasonable (< 4MB to be safe)
-        if (dataString.length < 4 * 1024 * 1024) {
-          localStorage.setItem(CACHE_KEY, dataString);
-          localStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString());
-          setCachedData(data);
-          setShowCachedWarning(false);
-        } else {
-          console.warn('Data too large to cache, skipping localStorage');
-        }
-      } catch (e) {
-        if (e instanceof Error && e.name === 'QuotaExceededError') {
-          console.warn('localStorage quota exceeded, clearing old cache');
-          // Clear cache and try with compressed data only
-          localStorage.removeItem(CACHE_KEY);
-          localStorage.removeItem(CACHE_TIMESTAMP_KEY);
-        } else {
-          console.error('Failed to cache data:', e);
-        }
-      }
-    }
+  const displayData = useMemo(() => {
+   return data && data.length > 0 ? data : [];
   }, [data]);
-
-  const displayData = data && data.length > 0 ? data : cachedData;
   
   const handleModeSwitch = (mode: 'markers' | 'heatmap') => {
     if (mode === mapMode) return;
@@ -363,7 +245,6 @@ const FireRiskDashboard: React.FC = () => {
       return;
     }
 
-    // Check if permissions API is available
     if (navigator.permissions && navigator.permissions.query) {
       try {
         const result = await navigator.permissions.query({ name: 'geolocation' });
@@ -376,7 +257,6 @@ const FireRiskDashboard: React.FC = () => {
 
   checkLocationPermission();
 
-  // Listen for permission changes (if supported)
   if (navigator.permissions) {
     navigator.permissions.query({ name: 'geolocation' }).then(permissionStatus => {
       permissionStatus.addEventListener('change', () => {
@@ -386,23 +266,21 @@ const FireRiskDashboard: React.FC = () => {
       console.warn('Permission monitoring not available');
     });
   }
-}, []);
+ }, []);
 
-// Replace your existing geolocation useEffect with this:
-useEffect(() => {
+ useEffect(() => {
   const getLocationFromIP = async () => {
     try {
-      const response = await fetch('https://ip-api.com/json/?fields=lat,lon,city,status');
+      const response = await fetch('https://geo.ipify.org/api/v2/country?apiKey=at_gEJtHyIl0V8krvwb0uFlPqJhWZ5p0');
       const data = await response.json();
       
-      if (data.status === 'success') {
+      if (data.location) {
         setUserLocation({
-          lat: data.lat,
-          lon: data.lon,
-          city: data.city || 'Your Location'
+          lat: data.location.lat,
+          lon: data.location.lng,
+          city: data.location.city || data.location.country || 'Your Location'
         });
         setLocationError(null);
-        console.log('Using IP-based location:', data.city);
       } else {
         console.warn('IP geolocation failed:', data.message);
         setLocationError('Location service unavailable');
@@ -427,7 +305,6 @@ useEffect(() => {
       setLocationError(null);
       
       const geoTimeout = setTimeout(() => {
-        console.warn('Reverse geocoding timeout');
         setUserLocation(prev => prev ? { ...prev, city: 'Your Location' } : null);
       }, 5000);
       
@@ -447,55 +324,38 @@ useEffect(() => {
     },
     (error) => {
       if (error?.code === 1) {
-        console.warn('Location permission denied');
         setLocationEnabled(false);
         getLocationFromIP();
       } else if (error?.code === 2 || error?.code === 3) {
-        console.warn('Geolocation temporarily unavailable');
-        setLocationError('Location service temporarily unavailable');
+        console.warn('Geolocation temporarily unavailable, using IP-based location');
+        getLocationFromIP();
       } else {
-        console.warn('Geolocation error, trying IP-based location');
+        console.warn('Geolocation error, using IP-based location');
         getLocationFromIP();
       }
     },
     {
       enableHighAccuracy: false,
-      timeout: 8000,
-      maximumAge: 300000
+      timeout: 5000,  
+      maximumAge: 0
     }
   );
  }, [locationEnabled]);
 
-  useEffect(() => {
-    if (displayData && displayData.length > 0 && userLocation) {
-      const stationMap = new Map<string, FireRiskData>();
-      displayData.forEach(point => {
-        const key = `${point.lat},${point.lon}`;
-        if (!stationMap.has(key) || point.riskLevel > stationMap.get(key)!.riskLevel) {
-          stationMap.set(key, point);
-        }
-      });
 
-      const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
-        const R = 6371;
-        const dLat = (lat2 - lat1) * Math.PI / 180;
-        const dLon = (lon2 - lon1) * Math.PI / 180;
-        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
-                Math.sin(dLon/2) * Math.sin(dLon/2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-        return R * c;
-      };
-
-      const stationsWithDistance = Array.from(stationMap.values()).map(station => ({
-        station,
-        distance: calculateDistance(userLocation.lat, userLocation.lon, station.lat, station.lon)
-      }));
-
-      const nearest = stationsWithDistance.sort((a, b) => a.distance - b.distance).slice(0, 2);
-      setNearestStations(nearest);
-    }
-  }, [displayData, userLocation]);
+ useEffect(() => {
+  if (displayData && displayData.length > 0 && userLocation) {
+    const stationsWithDistance = displayData.map(gridCell => ({
+      station: gridCell,
+      distance: calculateDistance(userLocation.lat, userLocation.lon, gridCell.lat, gridCell.lon)
+    }));
+    const nearest = stationsWithDistance
+      .sort((a, b) => a.distance - b.distance)
+      .slice(0, 2);
+    
+    setNearestStations(nearest);
+  }
+ }, [displayData, userLocation]);
 
   const calculateDisplayTime = (lastUpdatedTime: string | null): string => {
   if (!lastUpdatedTime) return '';
@@ -538,7 +398,7 @@ useEffect(() => {
 
  const getUpdateStatus = () => {
   if (loading) {
-    return { status: 'loading', message: 'Updating data...' };
+    return { status: 'loading', message: 'Loading latest data...' };
   }
   
   if (error) {
@@ -546,21 +406,20 @@ useEffect(() => {
   }
   
   if (!lastUpdated) {
-    return { status: 'updated', message: '' };
+    return { status: 'updated', message: 'Ready' };
   }
   
   return {
     status: 'updated',
-    message: displayTime
+    message: `Updated ${displayTime}`
   };
  };
  const updateStatus = getUpdateStatus();
 
 
   return (
-    <main className="min-h-screen" style={{ background: 'linear-gradient(135deg, #FFF8DC 0%, #FFE4B5 50%, #FFDAB9 100%)' }}>
+    <main className="min-h-screen" style={{ background: theme.gradients.pageBackground }}>
       <style jsx global>{`
-        /* Custom scrollbar styling for sidebar */
         .sidebar-scroll::-webkit-scrollbar {
           width: 8px;
         }
@@ -577,48 +436,40 @@ useEffect(() => {
         }
       `}</style>
 
-      <header className="shadow-md backdrop-blur-sm" style={{ backgroundColor: 'rgba(255, 218, 155, 0.7)', borderBottom: '2px solid rgba(218, 165, 32, 0.4)' }}>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-2 pb-3">
-          {/* Logo in top left */}
-          <div className="mb-3 flex items-center" style={{ marginLeft: '-4rem' }}>
+      <header className="shadow-md backdrop-blur-sm" style={theme.styles.header}>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 pb-4">
+          <div className="mb-2 hidden sm:flex items-center" style={theme.styles.logo}>
             <Image 
               src="/assets/logo/ffp-logo.svg" 
               alt="FFP Logo" 
               width={180}
               height={50}
-              className="h-16 w-auto"
+              className="h-22 w-auto"
               priority
               style={{ filter: 'drop-shadow(2px 2px 4px rgba(0,0,0,0.1))' }}
             />
           </div>
 
-          {/* Centered title and subtitle */}
-          <div className="text-center -mt-6">
-            <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight mb-5" style={{ color: '#8B4513', textShadow: '2px 2px 4px rgba(0,0,0,0.1)' }}>
+          <div className="text-center lg:-mt-4">
+            <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold tracking-tight mb-2" style={theme.styles.title}>
               Forest Fire Risk Predictor
             </h1>
             
-            <p className="text-sm sm:text-base font-medium max-w-3xl mx-auto mb-2" style={{ color: '#A0522D' }}>
+            <p className="text-xs sm:text-sm md:text-base font-medium max-w-3xl mx-auto mb-2" style={theme.styles.subtitle}>
               Real-time fire risk monitoring across Canada
             </p>
-            
-            {showCachedWarning && (
-              <div className="inline-block bg-yellow-100 border border-yellow-300 rounded px-3 py-1 text-xs text-yellow-800">
-                Showing cached data - refreshing...
-              </div>
-            )}
           </div>
-        </div> 
+        </div>
       </header>
             
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
           <div className="lg:col-span-3 space-y-6">
-            <div className="rounded-lg shadow-lg backdrop-blur-sm p-6" style={{ backgroundColor: 'rgba(255, 248, 230, 0.85)', border: '1px solid rgba(218, 165, 32, 0.3)' }}>
+            <div className="rounded-lg shadow-lg backdrop-blur-sm p-6 mb-6" style={theme.styles.panel}>
               <div className="mb-4">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-4">
-                    <h2 className="text-xl font-semibold text-amber-900">Canada Fire Risk Map</h2>
+                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between mb-3 gap-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+                    <h2 className="text-lg sm:text-xl font-semibold text-amber-900">Canada Fire Risk Map</h2>
                     <div className="flex items-center space-x-2">
                       {displayTime && (
                         <div className={`w-2.5 h-2.5 rounded-full shadow-sm ${
@@ -628,16 +479,18 @@ useEffect(() => {
                         }`}></div>
                       )}
                       <span className="text-xs text-amber-900 font-medium leading-none flex items-center h-2.5">
-                        {updateStatus.message && `Updated ${updateStatus.message}`}
+                        {updateStatus.message}
                       </span>
                     </div>
                   </div>
-                  <div className="flex items-center rounded-lg p-1" style={{ backgroundColor: 'rgba(255, 255, 255, 0.5)' }}>
-                    <button onClick={() => handleModeSwitch('markers')} className={`flex items-center px-3 py-2 rounded-md text-sm font-medium transition-all ${mapMode === 'markers' || pendingMode === 'markers' ? 'bg-white text-blue-700 shadow-md' : 'text-amber-800 hover:text-amber-900'}`}>
-                      <MapPin className="w-4 h-4 mr-1" />Markers
+                  <div className="flex items-center rounded-lg p-1" style={theme.styles.mapControlsBg}>
+                    <button onClick={() => handleModeSwitch('markers')} className={`flex items-center px-2 sm:px-3 py-2 rounded-md text-xs sm:text-sm font-medium transition-all ${mapMode === 'markers' || pendingMode === 'markers' ? 'bg-white text-blue-700 shadow-md' : 'text-amber-800 hover:text-amber-900'}`}>
+                      <MapPin className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
+                      <span>Markers</span>
                     </button>
-                    <button onClick={() => handleModeSwitch('heatmap')} className={`flex items-center px-3 py-2 rounded-md text-sm font-medium transition-all ${mapMode === 'heatmap' || pendingMode === 'heatmap' ? 'bg-white text-orange-700 shadow-md' : 'text-amber-800 hover:text-amber-900'}`}>
-                      <Layers className="w-4 h-4 mr-1" />Heatmap
+                    <button onClick={() => handleModeSwitch('heatmap')} className={`flex items-center px-2 sm:px-3 py-2 rounded-md text-xs sm:text-sm font-medium transition-all ${mapMode === 'heatmap' || pendingMode === 'heatmap' ? 'bg-white text-orange-700 shadow-md' : 'text-amber-800 hover:text-amber-900'}`}>
+                      <Layers className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
+                      <span>Heatmap</span>
                     </button>
                   </div>
                 </div>
@@ -746,7 +599,7 @@ useEffect(() => {
             </div>
           </div>
 
-          <div className="lg:col-span-1 sidebar-scroll" style={{ position: 'sticky', top: '20px', alignSelf: 'flex-start', maxHeight: 'calc(100vh - 40px)', overflowY: 'auto', paddingRight: '4px' }}>
+          <div className="lg:col-span-1 sidebar-scroll" style={theme.styles.sidebarScroll}>
             <div className="space-y-6">
             {userLocation && nearestStations.length > 0 && (
               <div className="rounded-lg shadow-lg backdrop-blur-sm p-6 mb-6" style={{ backgroundColor: 'rgba(255, 248, 230, 0.85)', border: '1px solid rgba(218, 165, 32, 0.3)' }}>
@@ -793,9 +646,9 @@ useEffect(() => {
                 </div>
               </div>
             )}
-            <StatisticsPanel data={displayData || []} modelInfo={modelInfo} loading={loading} userLocation={userLocation} />
+            <StatisticsPanel data={displayData || []} modelInfo={modelInfo} shouldShowSkeleton={shouldShowSkeleton} userLocation={userLocation} />
             {mapMode === 'heatmap' ? <HeatmapLegend /> : <Legend />}
-            <HighRiskAreas data={displayData || []} loading={loading} />
+            <HighRiskAreas data={displayData || []} shouldShowSkeleton={shouldShowSkeleton} />
             <div className="rounded-lg shadow-lg backdrop-blur-sm p-6" style={{ backgroundColor: 'rgba(255, 248, 230, 0.85)', border: '1px solid rgba(218, 165, 32, 0.3)' }}>
               <h3 className="text-lg font-semibold text-amber-900 mb-4">About the System</h3>
               <div className="text-sm text-amber-800 space-y-3">
