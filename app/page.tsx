@@ -1,7 +1,12 @@
 "use client";
 
 import FireRiskDashboard from './components/FireRiskDashboard';
+import ErrorBoundary from './components/ErrorBoundary';
 
 export default function Home() {
-  return <FireRiskDashboard />;
+  return (
+    <ErrorBoundary>
+      <FireRiskDashboard />
+    </ErrorBoundary>
+  );
 }
