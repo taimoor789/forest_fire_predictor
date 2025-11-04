@@ -1,36 +1,44 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+Forest Fire Risk Predictor - Frontend
+Interactive web application displaying real-time fire risk across Canada using the Canadian Fire Weather Index system.
+Overview
+Next.js application that visualizes fire risk data on an interactive map with:
 
-## Getting Started
+15,000+ grid cells showing fire danger levels
+38 weather stations with detailed risk information
+Real-time data updates (hourly)
+User geolocation for nearest high-risk areas
+Heatmap and marker visualization modes
 
-First, run the development server:
+Tech Stack
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+Next.js 15 - React framework
+TypeScript - Type safety
+Leaflet - Interactive maps
+Tailwind CSS - Styling
+Jest - Testing
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Features
+Interactive Map
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Markers Mode: 38 weather stations with aggregated risk data
+Heatmap Mode: 15,000+ grid cells showing fire risk density
+Click markers for detailed weather and risk information
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Risk Dashboard
 
-## Learn More
+Statistics panel (Very High, High, Medium, Low risk counts)
+High risk area alerts
+National risk overview
+Official Canadian resources
 
-To learn more about Next.js, take a look at the following resources:
+User Location
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Auto-detects location (with permission)
+Shows 2 nearest weather stations
+Displays distance and risk levels
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Browser Support
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Chrome/Edge (latest)
+Firefox (latest)
+Safari (latest)
