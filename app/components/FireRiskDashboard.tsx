@@ -7,9 +7,10 @@ import { useFireRiskData } from '../lib/api';
 import { FireRiskData } from '../types';
 import Image from 'next/image';
 import { CANADIAN_STATIONS } from '../lib/constants/stations';
-import { getRiskColor } from '../lib/utils/colours';
+import { getRiskColor, getRiskLabel } from '../lib/utils/colours';
 import { calculateDistance } from '../lib/utils/geo';
 import { theme } from '../lib/constants/theme';
+import { logger } from '../lib/utils/logger';
 
 
 const StatisticsPanel: React.FC<{ data: FireRiskData[]; modelInfo: any; shouldShowSkeleton: boolean; userLocation: { lat: number; lon: number; city?: string } | null }> = ({ data, modelInfo, shouldShowSkeleton, userLocation }) => {
@@ -79,12 +80,16 @@ const Legend: React.FC = () => {
       <h3 className="text-sm font-semibold text-amber-900 mb-3">Fire Risk Level</h3>
       <div className="space-y-2">
         {riskLevels.map((level, index) => (
-          <div key={index} className="flex items-center text-sm">
-            <div className="w-4 h-4 rounded mr-3 shadow-sm" style={{ backgroundColor: level.color }} />
-            <span className="flex-1 text-amber-900">{level.label}</span>
-            <span className="text-amber-700 text-xs">{level.range}</span>
-          </div>
-        ))}
+        <div key={index} className="flex items-center text-sm" role="listitem">
+          <div 
+            className="w-4 h-4 rounded mr-3 shadow-sm" 
+            style={{ backgroundColor: level.color }}
+            aria-label={`Risk level color: ${level.color}`}
+          />
+          <span className="flex-1 text-amber-900">{level.label}</span>
+          <span className="text-amber-700 text-xs">{level.range}</span>
+        </div>
+      ))}
       </div>
     </div>
   );
@@ -230,11 +235,17 @@ const FireRiskDashboard: React.FC = () => {
    return data && data.length > 0 ? data : [];
   }, [data]);
   
+  const [isSwitchingMode, setIsSwitchingMode] = useState(false);
+
   const handleModeSwitch = (mode: 'markers' | 'heatmap') => {
-    if (mode === mapMode) return;
+  if (mode === mapMode || isSwitchingMode) return;
+    setIsSwitchingMode(true);
     setMapMode(mode);
     setPendingMode(mode);
-    setTimeout(() => setPendingMode(null), 1000);
+    setTimeout(() => {
+      setPendingMode(null);
+      setIsSwitchingMode(false);
+    }, 2000); 
   };
 
   useEffect(() => {
@@ -250,7 +261,7 @@ const FireRiskDashboard: React.FC = () => {
         const result = await navigator.permissions.query({ name: 'geolocation' });
         setLocationEnabled(result.state === 'granted');
       } catch (err) {
-        console.warn('Could not query permissions:', err);
+        logger.warn('Could not query permissions:', err);
       }
     }
   };
@@ -263,7 +274,7 @@ const FireRiskDashboard: React.FC = () => {
         checkLocationPermission();
       });
     }).catch(() => {
-      console.warn('Permission monitoring not available');
+      logger.warn('Permission monitoring not available');
     });
   }
  }, []);
@@ -282,17 +293,17 @@ const FireRiskDashboard: React.FC = () => {
         });
         setLocationError(null);
       } else {
-        console.warn('IP geolocation failed:', data.message);
+        logger.warn('IP geolocation failed:', data.message);
         setLocationError('Location service unavailable');
       }
     } catch (err) {
-      console.error('IP geolocation error:', err);
+      logger.error('IP geolocation error:', err);
       setLocationError('Could not determine location');
     }
   };
 
   if (!navigator.geolocation) {
-    console.warn('Geolocation not supported, trying IP-based location');
+    logger.warn('Geolocation not supported, trying IP-based location');
     getLocationFromIP();
     return;
   }
@@ -327,10 +338,10 @@ const FireRiskDashboard: React.FC = () => {
         setLocationEnabled(false);
         getLocationFromIP();
       } else if (error?.code === 2 || error?.code === 3) {
-        console.warn('Geolocation temporarily unavailable, using IP-based location');
+        logger.warn('Geolocation temporarily unavailable, using IP-based location');
         getLocationFromIP();
       } else {
-        console.warn('Geolocation error, using IP-based location');
+        logger.warn('Geolocation error, using IP-based location');
         getLocationFromIP();
       }
     },
@@ -437,27 +448,28 @@ const FireRiskDashboard: React.FC = () => {
       `}</style>
 
       <header className="shadow-md backdrop-blur-sm" style={theme.styles.header}>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 pb-4">
-          <div className="mb-2 hidden sm:flex items-center" style={theme.styles.logo}>
-            <Image 
-              src="/assets/logo/ffp-logo.svg" 
-              alt="FFP Logo" 
-              width={180}
-              height={50}
-              className="h-22 w-auto"
-              priority
-              style={{ filter: 'drop-shadow(2px 2px 4px rgba(0,0,0,0.1))' }}
-            />
-          </div>
-
-          <div className="text-center lg:-mt-4">
-            <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold tracking-tight mb-2" style={theme.styles.title}>
-              Forest Fire Risk Predictor
-            </h1>
-            
-            <p className="text-xs sm:text-sm md:text-base font-medium max-w-3xl mx-auto mb-2" style={theme.styles.subtitle}>
-              Real-time fire risk monitoring across Canada
-            </p>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
+          <div className="grid grid-cols-1 sm:grid-cols-3 items-center">
+            <div className="hidden sm:flex items-center justify-self-start" style={theme.styles.logo}>
+              <Image 
+                src="/assets/logo/ffp-logo.svg" 
+                alt="FFP Logo" 
+                width={180}
+                height={50}
+                className="h-22 w-auto"
+                priority
+                style={{ filter: 'drop-shadow(2px 2px 4px rgba(0,0,0,0.1))' }}
+              />
+            </div>
+            <div className="text-center justify-self-center mt-2 sm:mt-0 sm:col-start-2 sm:flex sm:flex-col sm:justify-center">
+              <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold tracking-tight whitespace-nowrap leading-tight mb-3" style={theme.styles.title}>
+                Forest Fire Risk Predictor
+              </h1>
+              <p className="text-xs sm:text-sm md:text-base font-medium max-w-3xl mx-auto" style={theme.styles.subtitle}>
+                Real-time fire risk monitoring across Canada
+              </p>
+            </div>
+            <div className="hidden sm:block sm:col-start-3" />
           </div>
         </div>
       </header>
@@ -472,11 +484,15 @@ const FireRiskDashboard: React.FC = () => {
                     <h2 className="text-lg sm:text-xl font-semibold text-amber-900">Canada Fire Risk Map</h2>
                     <div className="flex items-center space-x-2">
                       {displayTime && (
-                        <div className={`w-2.5 h-2.5 rounded-full shadow-sm ${
-                          updateStatus.status === 'loading' ? 'bg-yellow-500 animate-pulse' : 
-                          updateStatus.status === 'error' ? 'bg-red-500' : 
-                          'bg-green-500'
-                        }`}></div>
+                        <div 
+                          className={`w-2.5 h-2.5 rounded-full shadow-sm ${
+                            updateStatus.status === 'loading' ? 'bg-yellow-500 animate-pulse' : 
+                            updateStatus.status === 'error' ? 'bg-red-500' : 
+                            'bg-green-500'
+                          }`}
+                          role="status"
+                          aria-label={`Data status: ${updateStatus.message}`}
+                        />
                       )}
                       <span className="text-xs text-amber-900 font-medium leading-none flex items-center h-2.5">
                         {updateStatus.message}
@@ -484,14 +500,30 @@ const FireRiskDashboard: React.FC = () => {
                     </div>
                   </div>
                   <div className="flex items-center rounded-lg p-1" style={theme.styles.mapControlsBg}>
-                    <button onClick={() => handleModeSwitch('markers')} className={`flex items-center px-2 sm:px-3 py-2 rounded-md text-xs sm:text-sm font-medium transition-all ${mapMode === 'markers' || pendingMode === 'markers' ? 'bg-white text-blue-700 shadow-md' : 'text-amber-800 hover:text-amber-900'}`}>
-                      <MapPin className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
-                      <span>Markers</span>
-                    </button>
-                    <button onClick={() => handleModeSwitch('heatmap')} className={`flex items-center px-2 sm:px-3 py-2 rounded-md text-xs sm:text-sm font-medium transition-all ${mapMode === 'heatmap' || pendingMode === 'heatmap' ? 'bg-white text-orange-700 shadow-md' : 'text-amber-800 hover:text-amber-900'}`}>
-                      <Layers className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
-                      <span>Heatmap</span>
-                    </button>
+                    <button 
+                    onClick={() => handleModeSwitch('markers')}
+                    aria-label="Switch to marker view"
+                    aria-pressed={mapMode === 'markers'}
+                    className={`flex items-center px-2 sm:px-3 py-2 rounded-md text-xs sm:text-sm font-medium transition-all ${mapMode === 'markers' || pendingMode === 'markers' ? 'bg-white text-blue-700 shadow-md' : 'text-amber-800 hover:text-amber-900'}`}
+                  >
+                    <MapPin className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
+                    <span>Markers</span>
+                  </button>
+
+                  <button 
+                    onClick={() => handleModeSwitch('heatmap')}
+                    disabled={isSwitchingMode}
+                    aria-label="Switch to heatmap view"
+                    aria-pressed={mapMode === 'heatmap'}
+                    className={`flex items-center px-2 sm:px-3 py-2 rounded-md text-xs sm:text-sm font-medium transition-all ${
+                      mapMode === 'heatmap' || pendingMode === 'heatmap' 
+                        ? 'bg-white text-orange-700 shadow-md' 
+                        : 'text-amber-800 hover:text-amber-900'
+                    } ${isSwitchingMode ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  >
+                    <Layers className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
+                    <span>{isSwitchingMode && pendingMode === 'heatmap' ? 'Loading...' : 'Heatmap'}</span>
+                  </button>
                   </div>
                 </div>
                 <p className="text-amber-800 text-sm">
@@ -624,11 +656,21 @@ const FireRiskDashboard: React.FC = () => {
                         </div>
                         <div className="flex items-center justify-between">
                           <div className="text-xs text-amber-800">{item.station.province}</div>
-                          <div className="text-xs px-2 py-1 rounded" style={{ 
-                            backgroundColor: riskColor + '20',
-                            color: riskColor,
-                            fontWeight: 600
-                          }}>
+                          <div 
+                            className="text-xs px-2 py-1 rounded flex items-center gap-1" 
+                            style={{ 
+                              backgroundColor: riskColor + '20',
+                              color: riskColor,
+                              fontWeight: 600
+                            }}
+                            role="status"
+                            aria-label={`Risk level: ${getRiskLabel(roundedRisk)}`}
+                          >
+                            <span 
+                              className="w-2 h-2 rounded-full" 
+                              style={{ backgroundColor: riskColor }}
+                              aria-hidden="true"
+                            />
                             {Math.round(item.station.riskLevel * 100)}% Risk
                           </div>
                         </div>
