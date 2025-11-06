@@ -1,5 +1,6 @@
 import { FireRiskData, ApiError as ApiErrorInterface} from "../types";
 import { useState, useEffect, useRef} from "react";
+import { logger } from "./utils/logger";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -317,7 +318,7 @@ export function useFireRiskData() {
             }
           }
         } catch (e) {
-          console.error('Failed to parse cached data:', e);
+          logger.error('Failed to parse cached data:', e);
         }
       }
     }
@@ -345,7 +346,7 @@ export function useFireRiskData() {
           item.location.trim() !== '';
 
         if (!isValid) {
-          console.warn("Invalid Fire Weather Index item", item);
+          logger.warn("Invalid Fire Weather Index item", item);
         }
         return isValid;
       });
@@ -377,41 +378,41 @@ export function useFireRiskData() {
             setCachedData(validatedData);
             setShowCachedWarning(false);
           } else {
-            console.warn('Data too large to cache, skipping localStorage');
+            logger.warn('Data too large to cache, skipping localStorage');
           }
         } catch (e) {
           if (e instanceof Error && e.name === 'QuotaExceededError') {
-            console.warn('localStorage quota exceeded, clearing old cache');
+            logger.warn('localStorage quota exceeded, clearing old cache');
             localStorage.removeItem(CACHE_KEY);
             localStorage.removeItem(CACHE_TIMESTAMP_KEY);
           } else {
-            console.error('Failed to cache data:', e);
+            logger.error('Failed to cache data:', e);
           }
         }
       }
 
       if (!lastUpdated || backendTimestamp !== lastUpdated) {
-        console.log('✅ New data from backend, updating lastUpdated to:', backendTimestamp);
+        logger.info(' New data from backend, updating lastUpdated to:', backendTimestamp);
         setLastUpdated(backendTimestamp);
       } else {
-        console.log('ℹ️ Same backend data, lastUpdated stays:', lastUpdated);
+        logger.info('ℹ Same backend data, lastUpdated stays:', lastUpdated);
       }
 
       setData(validatedData);
       setModelInfo(systemInfo);
       prevDataRef.current = validatedData;
 
-      console.log(`Loaded ${validatedData.length} Fire Weather Index predictions`);
+      logger.info(`Loaded ${validatedData.length} Fire Weather Index predictions`);
     } catch (err) {
-      console.error('Failed to fetch Fire Weather Index predictions:', err);
+      logger.error('Failed to fetch Fire Weather Index predictions:', err);
       setError(err instanceof ApiError ? err.message : 'Failed to load Fire Weather Index predictions');
       
       try {
         const { mockFireRiskData } = await import('./mockData');
         setData(mockFireRiskData);
-        console.log('Using mock data as fallback for Fire Weather Index');
+        logger.info('Using mock data as fallback for Fire Weather Index');
       } catch (mockError) {
-        console.error('Failed to load mock data:', mockError);
+        logger.error('Failed to load mock data:', mockError);
         setData([]);
       }
     } finally {
@@ -430,18 +431,18 @@ export function useFireRiskData() {
     };
 
     const timeUntilNext = getNextUpdateTime();
-    console.log(`Next Fire Weather Index update in ${Math.round(timeUntilNext / (1000 * 60))} minutes`);
+    logger.info(`Next Fire Weather Index update in ${Math.round(timeUntilNext / (1000 * 60))} minutes`);
 
     const initialTimeout = setTimeout(() => {
       fetchData();
       
       const hourlyInterval = setInterval(() => {
-        console.log('Fetching hourly Fire Weather Index update...');
+        logger.info('Fetching hourly Fire Weather Index update...');
         fetchData();
       }, 60 * 60 * 1000);
       
       return () => {
-        console.log('Cleaning up Fire Weather Index update interval');
+        logger.info('Cleaning up Fire Weather Index update interval');
         clearInterval(hourlyInterval);
       };
     }, timeUntilNext);

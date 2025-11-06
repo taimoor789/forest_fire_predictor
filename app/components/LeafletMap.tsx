@@ -3,6 +3,7 @@ import { FireRiskData } from '../types';
 import { CANADIAN_STATIONS } from '../lib/constants/stations';
 import { getRiskColor, getRiskLabel } from '../lib/utils/colours';
 import { calculateDistance } from '../lib/utils/geo';
+import { logger } from '../lib/utils/logger';
 
 declare global {
   interface Window {
@@ -34,7 +35,6 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
   const userLocationMarkerRef = useRef<any>(null);
   const isInitializedRef = useRef(false);
   const isCleaningUpRef = useRef(false);
-  const zoomListenerRef = useRef<any>(null);
   const scriptsLoadedRef = useRef(false);
   const [canadaGeoJSON, setCanadaGeoJSON] = useState<any>(null);
   const [boundaryStatus, setBoundaryStatus] = useState<string>('Loading boundaries...');
@@ -69,11 +69,11 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
           }
           
           if (canadaFeature) {
-            console.log('Found Canada boundary data from:', url);
+            logger.info('Found Canada boundary data from:', url);
             break;
           }
         } catch (err) {
-          console.warn(`Failed to load from ${url}:`, err);
+          logger.warn(`Failed to load from ${url}:`, err);
           continue;
         }
       }
@@ -117,7 +117,7 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
       return fallbackCanada;
 
     } catch (error) {
-      console.error('Error loading Canada boundary:', error);
+      logger.error('Error loading Canada boundary:', error);
       setBoundaryStatus('Error loading boundaries - using basic bounds');
       return null;
     }
@@ -182,7 +182,7 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
       
       return false;
     } catch (error) {
-      console.error('Error checking point in Canada:', error);
+      logger.error('Error checking point in Canada:', error);
       return lat >= 42 && lat <= 83.5 && lon >= -141 && lon <= -53;
     }
   }, [canadaGeoJSON, pointInPolygon]);
@@ -196,7 +196,7 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
           leafletMapRef.current.removeLayer(userLocationMarkerRef.current);
         }
       } catch (e) {
-        console.warn('Error removing user location marker:', e);
+        logger.warn('Error removing user location marker:', e);
       }
       userLocationMarkerRef.current = null;
     }
@@ -235,15 +235,15 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
       });
 
       userMarker.bindPopup(`
-        <div style="min-width: 180px; font-family: system-ui;">
-          <h3 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 600; color: #1e40af;">
-            📍 Your Location
-          </h3>
-          <div style="font-size: 12px; color: #374151;">
-            <div style="margin-bottom: 4px;">${userLocation.city || 'Current Position'}</div>
-          </div>
+      <div style="min-width: 180px; font-family: system-ui; role: region; aria-label: User location marker;">
+        <h3 style="margin: 0 0 8px 0;">
+          Your Location
+        </h3>
+        <div style="font-size: 12px; color: #374151;">
+          <div style="margin-bottom: 4px;">${userLocation.city || 'Current Position'}</div>
         </div>
-      `);
+       </div>
+     `);
 
       radarCircle.addTo(userLocationGroup);
       innerCircle.addTo(userLocationGroup);
@@ -252,9 +252,9 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
       userLocationGroup.addTo(leafletMapRef.current);
       userLocationMarkerRef.current = userLocationGroup;
     } catch (error) {
-      console.error('Error adding user location marker:', error);
+      logger.error('Error adding user location marker:', error);
     }
-  }, [userLocation]);
+  }, []);
 
   const loadScripts = useCallback(async () => {
     if (scriptsLoadedRef.current) return true;
@@ -290,169 +290,109 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
       scriptsLoadedRef.current = true;
       return true;
     } catch (error) {
-      console.error('Error loading scripts:', error);
+      logger.error('Error loading scripts:', error);
       return false;
     }
   }, []);
 
   const cleanupMap = useCallback(() => {
-    if (isCleaningUpRef.current) return;
-    isCleaningUpRef.current = true;
+  if (isCleaningUpRef.current) return;
+  isCleaningUpRef.current = true;
 
-    try {
-      if (leafletMapRef.current && zoomListenerRef.current) {
-        try {
-          leafletMapRef.current.off('zoomend', zoomListenerRef.current);
-        } catch (e) {
-          console.warn('Error removing zoom listener:', e);
-        }
-        zoomListenerRef.current = null;
+  try {
+    if (leafletMapRef.current) {
+      try {
+        leafletMapRef.current.off();
+        leafletMapRef.current.remove();
+      } catch {
+        // Ignore
       }
-
-      if (userLocationMarkerRef.current && leafletMapRef.current) {
-        try {
-          if (leafletMapRef.current.hasLayer && leafletMapRef.current.hasLayer(userLocationMarkerRef.current)) {
-            leafletMapRef.current.removeLayer(userLocationMarkerRef.current);
-          }
-        } catch (e) {
-          console.warn('Error removing user location marker:', e);
-        }
-        userLocationMarkerRef.current = null;
-      }
-
-      if (markersRef.current.length > 0) {
-        markersRef.current.forEach(marker => {
-          try {
-            if (marker && leafletMapRef.current && typeof leafletMapRef.current.hasLayer === 'function') {
-              if (leafletMapRef.current.hasLayer(marker)) {
-                leafletMapRef.current.removeLayer(marker);
-              }
-            }
-          } catch (e) {
-            console.warn('Error removing marker:', e);
-          }
-        });
-        markersRef.current = [];
-      }
-
-      if (heatmapLayerRef.current && leafletMapRef.current) {
-        try {
-          if (typeof leafletMapRef.current.hasLayer === 'function' && 
-              leafletMapRef.current.hasLayer(heatmapLayerRef.current)) {
-            leafletMapRef.current.removeLayer(heatmapLayerRef.current);
-          }
-        } catch (e) {
-          console.warn('Error removing heatmap:', e);
-        }
-        heatmapLayerRef.current = null;
-      }
-
-      if (leafletMapRef.current) {
-        try {
-          if (leafletMapRef.current.remove) {
-            leafletMapRef.current.remove();
-          }
-        } catch (e) {
-          console.warn('Error removing map:', e);
-        }
-        leafletMapRef.current = null;
-      }
-
-      if (mapRef.current) {
-        try {
-          const mapElement = mapRef.current as any;
-          if (mapElement._leaflet_id) {
-            delete mapElement._leaflet_id;
-          }
-          if (mapRef.current.parentNode) {
-            mapRef.current.innerHTML = '';
-          }
-        } catch (e) {
-          console.warn('Error clearing map container:', e);
-        }
-      }
-
-    } catch (error) {
-      console.error('Cleanup error:', error);
-    } finally {
-      isInitializedRef.current = false;
-      isCleaningUpRef.current = false;
-    }
-  }, []);
-
-  const addHeatmapToMap = useCallback(() => {
-    if (!leafletMapRef.current || !window.L) return;
-
-    if (!data || data.length === 0) {
-      setBoundaryStatus('No data available');
-      return;
+      leafletMapRef.current = null;
     }
 
-    if (markersRef.current.length > 0) {
-      markersRef.current.forEach(layer => {
-        try {
-          if (leafletMapRef.current && leafletMapRef.current.hasLayer(layer)) {
-            leafletMapRef.current.removeLayer(layer);
-          }
-        } catch (e) {
-          console.warn('Error removing layer:', e);
+    markersRef.current = [];
+    heatmapLayerRef.current = null;
+    userLocationMarkerRef.current = null;
+
+  } finally {
+    isInitializedRef.current = false;
+    isCleaningUpRef.current = false;
+  }
+ }, []); 
+
+const addHeatmapToMap = useCallback(() => {
+  if (!leafletMapRef.current || !window.L) return;
+
+  if (!data || data.length === 0) {
+    setBoundaryStatus('No data available');
+    return;
+  }
+
+  if (markersRef.current.length > 0) {
+    markersRef.current.forEach(layer => {
+      try {
+        if (leafletMapRef.current && leafletMapRef.current.hasLayer(layer)) {
+          leafletMapRef.current.removeLayer(layer);
         }
-      });
-      markersRef.current = [];
-    }
-
-    const canadianData = data.filter(point => {
-      const lat = Number(point.lat);
-      const lon = Number(point.lon);
-      
-      if (isNaN(lat) || isNaN(lon)) return false;
-      return isInCanada(lat, lon);
-    });
-
-    const rectangleSize = 0.6;
-    const halfSize = rectangleSize / 2;
-    const rectanglesToAdd: ReturnType<typeof window.L.rectangle>[] = [];
-
-    canadianData.forEach((point) => {
-      const lat = Number(point.lat);
-      const lon = Number(point.lon);
-      const risk = Number(point.riskLevel);
-
-      if (isNaN(lat) || isNaN(lon) || isNaN(risk)) return;
-
-      const color = getRiskColor(risk);
-
-      const bounds = [
-        [lat - halfSize, lon - halfSize],
-        [lat + halfSize, lon + halfSize]
-      ];
-
-      const rectangle = window.L.rectangle(bounds, {
-        fillColor: color,
-        color: color,
-        weight: 0,
-        opacity: 0.8,
-        fillOpacity: 0.7,
-        interactive: false
-      });
-
-      rectanglesToAdd.push(rectangle);
-    });
-
-    requestAnimationFrame(() => {
-      const layerGroup = window.L.layerGroup(rectanglesToAdd);
-      layerGroup.addTo(leafletMapRef.current);
-      
-      markersRef.current = [layerGroup];
-
-      setBoundaryStatus(`Coverage: ${rectanglesToAdd.length} areas`);
-      if (onStationCountUpdate) onStationCountUpdate(rectanglesToAdd.length);
-      
-      if (userLocation) {
-        requestAnimationFrame(() => addUserLocationMarker());
+      } catch (e) {
+        console.warn('Error removing layer:', e);
       }
     });
-  }, [data, isInCanada, onStationCountUpdate, userLocation, addUserLocationMarker]);
+    markersRef.current = [];
+  }
+
+  const canadianData = data.filter(point => {
+    const lat = Number(point.lat);
+    const lon = Number(point.lon);
+    
+    if (isNaN(lat) || isNaN(lon)) return false;
+    return isInCanada(lat, lon);
+  });
+
+  const rectangleSize = 0.6;
+  const halfSize = rectangleSize / 2;
+  const rectanglesToAdd: any[] = [];
+
+  canadianData.forEach((point) => {
+    const lat = Number(point.lat);
+    const lon = Number(point.lon);
+    const risk = Number(point.riskLevel);
+
+    if (isNaN(lat) || isNaN(lon) || isNaN(risk)) return;
+
+    const color = getRiskColor(risk);
+
+    const bounds = [
+      [lat - halfSize, lon - halfSize],
+      [lat + halfSize, lon + halfSize]
+    ];
+
+    const rectangle = window.L.rectangle(bounds, {
+      fillColor: color,
+      color: color,
+      weight: 0,
+      opacity: 0.8,
+      fillOpacity: 0.7,
+      interactive: false
+    });
+
+    rectanglesToAdd.push(rectangle);
+  });
+
+  requestAnimationFrame(() => {
+    const layerGroup = window.L.layerGroup(rectanglesToAdd);
+    layerGroup.addTo(leafletMapRef.current);
+    
+    markersRef.current = [layerGroup];
+
+    setBoundaryStatus(`Coverage: ${rectanglesToAdd.length} areas`);
+    if (onStationCountUpdate) onStationCountUpdate(rectanglesToAdd.length);
+    
+    if (userLocation) {
+      requestAnimationFrame(() => addUserLocationMarker());
+    }
+  });
+ }, [data, isInCanada, getRiskColor, onStationCountUpdate, userLocation, addUserLocationMarker]);
 
   const clearHeatmap = useCallback(() => {
     if (heatmapLayerRef.current && leafletMapRef.current) {
@@ -462,7 +402,7 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
           leafletMapRef.current.removeLayer(heatmapLayerRef.current);
         }
       } catch (e) {
-        console.warn('Error clearing heatmap:', e);
+        logger.warn('Error clearing heatmap:', e);
       }
       heatmapLayerRef.current = null;
     }
@@ -551,7 +491,7 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
           leafletMapRef.current.removeLayer(marker);
         }
       } catch (e) {
-        console.warn('Error removing marker:', e);
+        logger.warn('Error removing marker:', e);
       }
     });
     markersRef.current = [];
@@ -590,7 +530,7 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
             </h3>
             <div style="font-size: 14px; line-height: 1.4; color: #374151;">
               <div style="margin-bottom: 6px; padding: 4px 8px; background-color: ${color}; color: white; border-radius: 4px; font-weight: 500;">
-                <strong>Fire Risk:</strong> ${getRiskLabel(station.riskLevel)}
+                <strong>Fire Risk:</strong> ${getRiskLabel(station.riskLevel)} (${Math.round(station.riskLevel * 100)}%)
               </div>
               <div style="margin-bottom: 4px;"><strong>Temperature:</strong> ${station.temperature}°C</div>
               <div style="margin-bottom: 4px;"><strong>Humidity:</strong> ${station.humidity}%</div>
@@ -619,7 +559,7 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
         markersRef.current.push(marker);
 
       } catch (error) {
-        console.error(`Error creating marker for ${station.location}:`, error);
+        logger.error(`Error creating marker for ${station.location}:`, error);
       }
     });
 
@@ -628,7 +568,7 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
     if (userLocation) {
       requestAnimationFrame(() => addUserLocationMarker());
     }
-  }, [createStationData, clearMarkers, onLocationClick, onStationCountUpdate, userLocation, addUserLocationMarker]);
+  }, []);
 
   useEffect(() => {
     if (!mapRef.current || isInitializedRef.current || isCleaningUpRef.current) return;
@@ -689,13 +629,13 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
                   addHeatmapToMap();
                 }
               } catch (error) {
-                console.error('Error adding initial visualization:', error);
+                logger.error('Error adding initial visualization:', error);
               }
             }, 500);
           }
         }
       } catch (error) {
-        console.error('Error initializing map:', error);
+        logger.error('Error initializing map:', error);
         setBoundaryStatus('Error initializing map');
       }
     };
@@ -710,7 +650,7 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
       };
       cleanup();
     };
-  }, [loadScripts, loadCanadaBoundary, cleanupMap, addMarkersToMap, addHeatmapToMap, mapMode, data]);
+  }, []);
 
   useEffect(() => {
     if (!isInitializedRef.current || !leafletMapRef.current || isCleaningUpRef.current) return;
@@ -726,7 +666,7 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
           addHeatmapToMap();
         }
       } catch (error) {
-        console.error('Error updating visualization:', error);
+        logger.error('Error updating visualization:', error);
       }
     };
 
@@ -742,53 +682,31 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
   }, [userLocation, addUserLocationMarker, mapMode]);
 
   return (
-    <div
-      ref={mapRef}
-      style={{ 
-        height, 
-        width: '100%',
-        backgroundColor: '#e0f2fe',
-        position: 'relative'
-      }}
-      className="leaflet-map-container"
-    >
-      {!isInitializedRef.current && !isCleaningUpRef.current && (
-        <div 
-          key="loading-overlay" 
-          className="absolute inset-0 flex items-center justify-center bg-gray-100 rounded z-10"
-          style={{ pointerEvents: 'none' }}
-        >
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
-            <p className="text-gray-600 text-sm">Loading map and Canada boundaries...</p>
-          </div>
+  <div
+    ref={mapRef}
+    style={{ 
+      height, 
+      width: '100%',
+      backgroundColor: '#e0f2fe',
+      position: 'relative'
+    }}
+    className="leaflet-map-container"
+    suppressHydrationWarning
+  >
+    {!isInitializedRef.current && !isCleaningUpRef.current && (
+      <div 
+        key="loading-overlay" 
+        className="absolute inset-0 flex items-center justify-center bg-gray-100 rounded z-10"
+        style={{ pointerEvents: 'none' }}
+      >
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
+          <p className="text-gray-600 text-sm">Loading map and Canada boundaries...</p>
         </div>
-      )}
-      
-      {isInitializedRef.current && !isCleaningUpRef.current && (
-        <div 
-          key="map-status" 
-          className="absolute top-4 right-4 bg-white/90 backdrop-blur px-3 py-2 rounded-lg shadow-sm z-[1000] text-sm font-medium text-gray-700"
-        >
-          {mapMode === 'heatmap' ? (
-            <div className="text-right">
-              <div>Fire Risk Heatmap</div>
-              <div className="text-xs text-gray-500 mt-1">
-                {boundaryStatus}
-              </div>
-            </div>
-          ) : (
-            <div className="text-right">
-              <div>Station View</div>
-              <div className="text-xs text-gray-500 mt-1">
-                ({markersRef.current.length} stations)
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
+      </div>
+    )}
+  </div>
+ );
 };
 
 export default LeafletMap;
