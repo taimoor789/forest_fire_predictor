@@ -83,40 +83,41 @@ export interface FWIPredictionResponse {
 export class FireRiskAPI {
   // Private static helper method for making fetch requests with consistent error handling
   private static async fetchWithErrorHandling<T>(
-    url: string,
-    options?: RequestInit
-  ): Promise<T> {
-    try {
-      const response = await fetch(`${API_BASE_URL}${url}`, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache',
-          ...options?.headers,
-        },
-        ...options
-      });
+   url: string,
+   options?: RequestInit
+   ): Promise<T> {
+   try {
+    const response = await fetch(`${API_BASE_URL}${url}`, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        ...options?.headers,
+      },
+      cache: 'no-store',
+      ...options
+    });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new ApiError(
-          response.status.toString(),
-          errorData.message || `HTTP error! status: ${response.status}`,
-          errorData
-        );
-      }
-
-      return await response.json();
-    } catch (error) {
-      if (error instanceof ApiError) {
-        throw error;
-      }
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
       throw new ApiError(
-        'NETWORK_ERROR',
-        'Failed to fetch data from server',
-        error
+        response.status.toString(),
+        errorData.message || `HTTP error! status: ${response.status}`,
+        errorData
       );
     }
+
+    return await response.json();
+   } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiError(
+      'NETWORK_ERROR',
+      'Failed to fetch data from server',
+      error
+    );
+   }
   }
 
   static async getFireRiskPredictions(): Promise<{ data: FireRiskData[], batchTimestamp: string }> {

@@ -653,25 +653,34 @@ const addHeatmapToMap = useCallback(() => {
   }, []);
 
   useEffect(() => {
-    if (!isInitializedRef.current || !leafletMapRef.current || isCleaningUpRef.current) return;
-    
-    const updateVisualization = async () => {
-      try {
-        if (mapMode === 'markers' && data && data.length > 0) {
-          clearHeatmap();
-          setTimeout(() => {
-            if (leafletMapRef.current) addMarkersToMap();
-          }, 100);
-        } else if (mapMode === 'heatmap' && data && data.length > 0) {
-          addHeatmapToMap();
-        }
-      } catch (error) {
-        logger.error('Error updating visualization:', error);
+  if (!isInitializedRef.current || !leafletMapRef.current || isCleaningUpRef.current) return;
+  
+  const updateVisualization = async () => {
+    try {
+      if (mapMode === 'markers' && data && data.length > 0) {
+        clearHeatmap();
+        clearMarkers(); // Clear old markers first
+        setTimeout(() => {
+          if (leafletMapRef.current && !isCleaningUpRef.current) {
+            addMarkersToMap();
+          }
+        }, 100);
+      } else if (mapMode === 'heatmap' && data && data.length > 0) {
+        clearMarkers();
+        clearHeatmap(); // Clear old heatmap first
+        setTimeout(() => {
+          if (leafletMapRef.current && !isCleaningUpRef.current) {
+            addHeatmapToMap();
+          }
+        }, 100);
       }
-    };
+    } catch (error) {
+      logger.error('Error updating visualization:', error);
+    }
+  };
 
-    updateVisualization();
-  }, [data, mapMode, addMarkersToMap, addHeatmapToMap, clearHeatmap]);
+  updateVisualization();
+ }, [data, mapMode, addMarkersToMap, addHeatmapToMap, clearHeatmap, clearMarkers]);
 
   useEffect(() => {
     if (isInitializedRef.current && leafletMapRef.current && userLocation) {

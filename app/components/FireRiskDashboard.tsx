@@ -249,110 +249,43 @@ const FireRiskDashboard: React.FC = () => {
   };
 
   useEffect(() => {
-  const checkLocationPermission = async () => {
-    if (!navigator.geolocation) {
-      setLocationError('Geolocation not supported');
-      setLocationEnabled(false);
-      return;
-    }
-
-    if (navigator.permissions && navigator.permissions.query) {
-      try {
-        const result = await navigator.permissions.query({ name: 'geolocation' });
-        setLocationEnabled(result.state === 'granted');
-      } catch (err) {
-        logger.warn('Could not query permissions:', err);
-      }
-    }
-  };
-
-  checkLocationPermission();
-
-  if (navigator.permissions) {
-    navigator.permissions.query({ name: 'geolocation' }).then(permissionStatus => {
-      permissionStatus.addEventListener('change', () => {
-        checkLocationPermission();
-      });
-    }).catch(() => {
-      logger.warn('Permission monitoring not available');
-    });
-  }
- }, []);
-
- useEffect(() => {
-  const getLocationFromIP = async () => {
-    try {
-      const response = await fetch(`https://geo.ipify.org/api/v2/country?apiKey=${process.env.NEXT_PUBLIC_GEO_API_KEY}`);
-      const data = await response.json();
-      
-      if (data.location) {
-        setUserLocation({
-          lat: data.location.lat,
-          lon: data.location.lng,
-          city: data.location.city || data.location.country || 'Your Location'
-        });
-        setLocationError(null);
-      } else {
-        logger.warn('IP geolocation failed:', data.message);
-        setLocationError('Location service unavailable');
-      }
-    } catch (err) {
-      logger.error('IP geolocation error:', err);
-      setLocationError('Could not determine location');
-    }
-  };
-
-  if (!navigator.geolocation) {
-    logger.warn('Geolocation not supported, trying IP-based location');
-    getLocationFromIP();
+   if (!navigator.geolocation) {
+    setLocationError('Geolocation not supported');
+    setLocationEnabled(false);
     return;
-  }
+   }
 
   navigator.geolocation.getCurrentPosition(
     (position) => {
       const userLat = position.coords.latitude;
       const userLon = position.coords.longitude;
-      setUserLocation({ lat: userLat, lon: userLon });
+      setUserLocation({ lat: userLat, lon: userLon, city: 'Your Location' });
       setLocationError(null);
-      
-      const geoTimeout = setTimeout(() => {
-        setUserLocation(prev => prev ? { ...prev, city: 'Your Location' } : null);
-      }, 5000);
       
       fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${userLat}&lon=${userLon}`, {
         headers: { 'User-Agent': 'FireRiskDashboard/1.0' }
       })
         .then(res => res.json())
         .then(data => {
-          clearTimeout(geoTimeout);
           const city = data.address?.city || data.address?.town || data.address?.county || 'Your Location';
           setUserLocation(prev => prev ? { ...prev, city } : null);
         })
         .catch(() => {
-          clearTimeout(geoTimeout);
-          setUserLocation(prev => prev ? { ...prev, city: 'Your Location' } : null);
+          // Ignore errors - coordinates already set
         });
     },
     (error) => {
-      if (error?.code === 1) {
-        setLocationEnabled(false);
-        getLocationFromIP();
-      } else if (error?.code === 2 || error?.code === 3) {
-        logger.warn('Geolocation temporarily unavailable, using IP-based location');
-        getLocationFromIP();
-      } else {
-        logger.warn('Geolocation error, using IP-based location');
-        getLocationFromIP();
-      }
+      logger.warn('Geolocation error:', error);
+      setLocationError('Location permission denied or unavailable');
+      setLocationEnabled(false);
     },
     {
       enableHighAccuracy: false,
-      timeout: 5000,  
-      maximumAge: 0
+      timeout: 10000,
+      maximumAge: 300000  
     }
   );
- }, [locationEnabled]);
-
+ }, []); 
 
  useEffect(() => {
   if (displayData && displayData.length > 0 && userLocation) {
