@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { MapPin, Layers, AlertTriangle, TrendingUp, ExternalLink } from 'lucide-react';
 import MapComponent from './Map';
 import { useFireRiskData } from '../lib/api';
@@ -227,9 +227,10 @@ const FireRiskDashboard: React.FC = () => {
   const [stationCount, setStationCount] = useState<number>(0);
   const [pendingMode, setPendingMode] = useState<'markers' | 'heatmap' | null>(null);
   const [userLocation, setUserLocation] = useState<{ lat: number; lon: number; city?: string } | null>(null);
-  const [locationError, setLocationError] = useState<string | null>(null);
+const [locationError, setLocationError] = useState<string | null>(null);
   const [nearestStations, setNearestStations] = useState<Array<{ station: FireRiskData; distance: number }>>([]);
-  const [locationEnabled, setLocationEnabled] = useState(true);
+const [locationEnabled, setLocationEnabled] = useState(true);
+const locationRequestedRef = useRef(false);
 
   const displayData = useMemo(() => {
    return data && data.length > 0 ? data : [];
@@ -249,43 +250,65 @@ const FireRiskDashboard: React.FC = () => {
   };
 
   useEffect(() => {
-   if (!navigator.geolocation) {
+  if (locationRequestedRef.current) return;
+  locationRequestedRef.current = true;
+
+  if (!navigator.geolocation) {
     setLocationError('Geolocation not supported');
     setLocationEnabled(false);
     return;
-   }
+  }
+
+  logger.info('Requesting user location...');
 
   navigator.geolocation.getCurrentPosition(
     (position) => {
       const userLat = position.coords.latitude;
       const userLon = position.coords.longitude;
+      
+      logger.info(`Location obtained: ${userLat}, ${userLon}`);
       setUserLocation({ lat: userLat, lon: userLon, city: 'Your Location' });
       setLocationError(null);
+      setLocationEnabled(true);
       
+      // Get city name asynchronously (non-blocking)
       fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${userLat}&lon=${userLon}`, {
         headers: { 'User-Agent': 'FireRiskDashboard/1.0' }
       })
         .then(res => res.json())
         .then(data => {
           const city = data.address?.city || data.address?.town || data.address?.county || 'Your Location';
-          setUserLocation(prev => prev ? { ...prev, city } : null);
+          setUserLocation(prev => {
+            if (!prev) return null;
+            return { ...prev, city };
+          });
         })
-        .catch(() => {
-          // Ignore errors - coordinates already set
+        .catch(err => {
+          logger.warn('Failed to get city name:', err);
         });
     },
     (error) => {
-      logger.warn('Geolocation error:', error);
-      setLocationError('Location permission denied or unavailable');
+      logger.error('Geolocation error:', error.code);
+      
+      let errorMsg = 'Location unavailable';
+      if (error.code === 1) {
+        errorMsg = 'Location permission denied';
+      } else if (error.code === 2) {
+        errorMsg = 'Location unavailable';
+      } else if (error.code === 3) {
+        errorMsg = 'Location request timed out';
+      }
+      
+      setLocationError(errorMsg);
       setLocationEnabled(false);
     },
     {
       enableHighAccuracy: false,
-      timeout: 10000,
-      maximumAge: 300000  
+      timeout: 15000,
+      maximumAge: 600000  
     }
   );
- }, []); 
+ }, []);
 
  useEffect(() => {
   if (displayData && displayData.length > 0 && userLocation) {
@@ -298,6 +321,8 @@ const FireRiskDashboard: React.FC = () => {
       .slice(0, 2);
     
     setNearestStations(nearest);
+  } else {
+    setNearestStations([]); 
   }
  }, [displayData, userLocation]);
 
