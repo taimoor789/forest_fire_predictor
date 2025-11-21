@@ -657,22 +657,20 @@ const addHeatmapToMap = useCallback(() => {
   
   const updateVisualization = async () => {
     try {
+      logger.info('Data changed, updating map visualization...');
+      
+      clearMarkers();
+      clearHeatmap();
+      
+      // Small delay to ensure cleanup completes
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
       if (mapMode === 'markers' && data && data.length > 0) {
-        clearHeatmap();
-        clearMarkers(); // Clear old markers first
-        setTimeout(() => {
-          if (leafletMapRef.current && !isCleaningUpRef.current) {
-            addMarkersToMap();
-          }
-        }, 100);
+        logger.info(`Adding ${data.length} markers to map`);
+        addMarkersToMap();
       } else if (mapMode === 'heatmap' && data && data.length > 0) {
-        clearMarkers();
-        clearHeatmap(); // Clear old heatmap first
-        setTimeout(() => {
-          if (leafletMapRef.current && !isCleaningUpRef.current) {
-            addHeatmapToMap();
-          }
-        }, 100);
+        logger.info(`Adding heatmap with ${data.length} points`);
+        addHeatmapToMap();
       }
     } catch (error) {
       logger.error('Error updating visualization:', error);
@@ -680,7 +678,7 @@ const addHeatmapToMap = useCallback(() => {
   };
 
   updateVisualization();
- }, [data, mapMode, addMarkersToMap, addHeatmapToMap, clearHeatmap, clearMarkers]);
+ }, [data, mapMode]);
 
   useEffect(() => {
     if (isInitializedRef.current && leafletMapRef.current && userLocation) {
