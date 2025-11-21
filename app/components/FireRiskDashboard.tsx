@@ -250,7 +250,12 @@ const locationRequestedRef = useRef(false);
   };
 
   useEffect(() => {
-  if (locationRequestedRef.current) return;
+  // Guard against duplicate requests in same mount
+  if (locationRequestedRef.current) {
+    logger.info('Location already requested in this session');
+    return;
+  }
+  
   locationRequestedRef.current = true;
 
   if (!navigator.geolocation) {
@@ -305,10 +310,15 @@ const locationRequestedRef = useRef(false);
     {
       enableHighAccuracy: false,
       timeout: 15000,
-      maximumAge: 600000  
+      maximumAge: 600000
     }
   );
- }, []);
+
+  return () => {
+    logger.info('Geolocation component unmounting, resetting ref');
+    locationRequestedRef.current = false;
+  };
+ }, []); 
 
  useEffect(() => {
   if (displayData && displayData.length > 0 && userLocation) {
