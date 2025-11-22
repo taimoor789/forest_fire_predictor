@@ -678,7 +678,8 @@ const addHeatmapToMap = useCallback(() => {
   };
 
   updateVisualization();
- }, [data, mapMode]);
+ }, [data, mapMode, addMarkersToMap, addHeatmapToMap, clearMarkers, clearHeatmap]);
+ 
 
   useEffect(() => {
     if (isInitializedRef.current && leafletMapRef.current && userLocation) {
