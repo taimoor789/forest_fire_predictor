@@ -466,6 +466,11 @@ const locationRequestedRef = useRef(false);
                         {updateStatus.message}
                       </span>
                     </div>
+                    {!loading && lastUpdated && (
+                      <div className="text-xs text-amber-700 italic mt-1">
+                          Updates hourly at :05 past each hour
+                      </div>
+                    )}
                   </div>
                   <div className="flex items-center rounded-lg p-1" style={theme.styles.mapControlsBg}>
                     <button 
