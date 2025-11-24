@@ -227,10 +227,11 @@ const FireRiskDashboard: React.FC = () => {
   const [stationCount, setStationCount] = useState<number>(0);
   const [pendingMode, setPendingMode] = useState<'markers' | 'heatmap' | null>(null);
   const [userLocation, setUserLocation] = useState<{ lat: number; lon: number; city?: string } | null>(null);
-const [locationError, setLocationError] = useState<string | null>(null);
+  const [locationError, setLocationError] = useState<string | null>(null);
   const [nearestStations, setNearestStations] = useState<Array<{ station: FireRiskData; distance: number }>>([]);
-const [locationEnabled, setLocationEnabled] = useState(true);
-const locationRequestedRef = useRef(false);
+  const [locationEnabled, setLocationEnabled] = useState(true);
+  const locationRequestedRef = useRef(false);
+  const hasSetLocationRef = useRef(false);
 
   const displayData = useMemo(() => {
    return data && data.length > 0 ? data : [];
@@ -249,8 +250,8 @@ const locationRequestedRef = useRef(false);
     }, 2000); 
   };
 
-  useEffect(() => {
-  // Guard against duplicate requests in same mount
+useEffect(() => {
+  // Guard: Only run once per session
   if (locationRequestedRef.current) {
     logger.info('Location already requested in this session');
     return;
@@ -268,29 +269,60 @@ const locationRequestedRef = useRef(false);
 
   navigator.geolocation.getCurrentPosition(
     (position) => {
+      // Guard: Prevent duplicate location sets
+      if (hasSetLocationRef.current) {
+        logger.info('Location already set, skipping duplicate');
+        return;
+      }
+      
       const userLat = position.coords.latitude;
       const userLon = position.coords.longitude;
       
       logger.info(`Location obtained: ${userLat}, ${userLon}`);
+      hasSetLocationRef.current = true;
+      
+      // Set initial location with "Your Location" placeholder
       setUserLocation({ lat: userLat, lon: userLon, city: 'Your Location' });
       setLocationError(null);
       setLocationEnabled(true);
       
-      // Get city name asynchronously (non-blocking)
-      fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${userLat}&lon=${userLon}`, {
-        headers: { 'User-Agent': 'FireRiskDashboard/1.0' }
-      })
-        .then(res => res.json())
-        .then(data => {
+      // Fetch city name asynchronously (non-blocking)
+      const getCityName = async () => {
+        try {
+          const response = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${userLat}&lon=${userLon}`,
+            {
+              headers: { 'User-Agent': 'FireRiskDashboard/1.0' }
+            }
+          );
+          
+          if (!response.ok) {
+            throw new Error('Geocoding failed');
+          }
+          
+          const data = await response.json();
           const city = data.address?.city || data.address?.town || data.address?.county || 'Your Location';
+          const province = data.address?.state || '';
+          
+          const displayName = province ? `${city}, ${province}` : city;
+          
+          // Only update if we still have the same location
           setUserLocation(prev => {
-            if (!prev) return null;
-            return { ...prev, city };
+            if (!prev || (prev.lat === userLat && prev.lon === userLon)) {
+              return { ...prev!, city: displayName };
+            }
+            return prev;
           });
-        })
-        .catch(err => {
+          
+          logger.info(`City name resolved: ${displayName}`);
+        } catch (err) {
           logger.warn('Failed to get city name:', err);
-        });
+          // Keep "Your Location" as fallback
+        }
+      };
+      
+      // Delay city fetch slightly to avoid rate limiting
+      setTimeout(getCityName, 500);
     },
     (error) => {
       logger.error('Geolocation error:', error.code);
@@ -306,19 +338,21 @@ const locationRequestedRef = useRef(false);
       
       setLocationError(errorMsg);
       setLocationEnabled(false);
+      hasSetLocationRef.current = false; // Reset on error
     },
     {
       enableHighAccuracy: false,
       timeout: 15000,
-      maximumAge: 600000
+      maximumAge: 600000 // 10 minutes cache
     }
   );
 
   return () => {
     logger.info('Geolocation component unmounting, resetting ref');
     locationRequestedRef.current = false;
+    hasSetLocationRef.current = false;
   };
- }, []); 
+ }, []);
 
  useEffect(() => {
   if (displayData && displayData.length > 0 && userLocation) {
@@ -597,52 +631,64 @@ const updateStatus = getUpdateStatus();
           <div className="lg:col-span-1 sidebar-scroll" style={theme.styles.sidebarScroll}>
             <div className="space-y-6">
             {userLocation && nearestStations.length > 0 && (
-              <div className="rounded-lg shadow-lg backdrop-blur-sm p-6 mb-6" style={{ backgroundColor: 'rgba(255, 248, 230, 0.85)', border: '1px solid rgba(218, 165, 32, 0.3)' }}>
-                <div className="flex items-center mb-4">
-                  <MapPin className="w-5 h-5 mr-2 text-orange-700" />
-                  <h3 className="text-lg font-semibold text-amber-900">Nearest Stations</h3>
-                </div>
-                <div className="mb-3 pb-3 border-b border-amber-200">
-                  <div className="text-sm text-amber-800">
-                    <span className="font-medium">📍 {userLocation.city || 'Your Location'}</span>
+            <div className="rounded-lg shadow-lg backdrop-blur-sm p-6 mb-6" style={{ backgroundColor: 'rgba(255, 248, 230, 0.85)', border: '1px solid rgba(218, 165, 32, 0.3)' }}>
+              <div className="flex items-center mb-4">
+                <MapPin className="w-5 h-5 mr-2 text-orange-700" />
+                <h3 className="text-lg font-semibold text-amber-900">Nearest Stations</h3>
+              </div>
+              <div className="mb-3 pb-3 border-b border-amber-200">
+                <div className="text-sm text-amber-800">
+                  <div className="font-medium flex items-center">
+                    <span className="mr-1">📍</span>
+                    {userLocation.city && userLocation.city !== 'Your Location' ? (
+                      <span>{userLocation.city}</span>
+                    ) : (
+                      <span className="italic text-amber-600">Locating...</span>
+                    )}
                   </div>
-                </div>
-                <div className="space-y-3">
-                  {nearestStations.map((item, index) => {
-                    const roundedRisk = Math.round(item.station.riskLevel * 100) / 100;
-                    const riskColor = getRiskColor(roundedRisk);
-                    return (
-                      <div key={index} className="p-3 rounded-lg shadow-sm" style={{ backgroundColor: 'rgba(255, 255, 255, 0.7)' }}>
-                        <div className="flex justify-between items-start mb-2">
-                          <div className="font-medium text-sm text-amber-900">{item.station.location}</div>
-                          <div className="text-xs text-orange-700 font-semibold">{Math.round(item.distance)} km</div>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <div className="text-xs text-amber-800">{item.station.province}</div>
-                          <div 
-                            className="text-xs px-2 py-1 rounded flex items-center gap-1" 
-                            style={{ 
-                              backgroundColor: riskColor + '20',
-                              color: riskColor,
-                              fontWeight: 600
-                            }}
-                            role="status"
-                            aria-label={`Risk level: ${getRiskLabel(roundedRisk)}`}
-                          >
-                            <span 
-                              className="w-2 h-2 rounded-full" 
-                              style={{ backgroundColor: riskColor }}
-                              aria-hidden="true"
-                            />
-                            {Math.round(item.station.riskLevel * 100)}% Risk
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
+                  {userLocation.city === 'Your Location' && (
+                    <div className="text-xs text-amber-600 mt-1">
+                      {userLocation.lat.toFixed(2)}°N, {Math.abs(userLocation.lon).toFixed(2)}°W
+                    </div>
+                  )}
                 </div>
               </div>
-            )}
+              <div className="space-y-3">
+                {nearestStations.map((item, index) => {
+                  const roundedRisk = Math.round(item.station.riskLevel * 100) / 100;
+                  const riskColor = getRiskColor(roundedRisk);
+                  return (
+                    <div key={index} className="p-3 rounded-lg shadow-sm" style={{ backgroundColor: 'rgba(255, 255, 255, 0.7)' }}>
+                      <div className="flex justify-between items-start mb-2">
+                        <div className="font-medium text-sm text-amber-900">{item.station.location}</div>
+                        <div className="text-xs text-orange-700 font-semibold">{Math.round(item.distance)} km</div>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div className="text-xs text-amber-800">{item.station.province}</div>
+                        <div 
+                          className="text-xs px-2 py-1 rounded flex items-center gap-1" 
+                          style={{ 
+                            backgroundColor: riskColor + '20',
+                            color: riskColor,
+                            fontWeight: 600
+                          }}
+                          role="status"
+                          aria-label={`Risk level: ${getRiskLabel(roundedRisk)}`}
+                        >
+                          <span 
+                            className="w-2 h-2 rounded-full" 
+                            style={{ backgroundColor: riskColor }}
+                            aria-hidden="true"
+                          />
+                          {Math.round(item.station.riskLevel * 100)}% Risk
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+           )}
             {locationError && !userLocation && (
               <div className="rounded-lg shadow-lg backdrop-blur-sm p-4 mb-6" style={{ backgroundColor: 'rgba(254, 243, 199, 0.9)', border: '1px solid rgba(245, 158, 11, 0.3)' }}>
                 <div className="flex items-center text-sm text-amber-800">
