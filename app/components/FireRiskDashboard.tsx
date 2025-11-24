@@ -336,44 +336,32 @@ const locationRequestedRef = useRef(false);
   }
  }, [displayData, userLocation]);
 
-  const calculateDisplayTime = (lastUpdatedTime: string | null): string => {
+ const formatUpdateTime = (lastUpdatedTime: string | null): string => {
   if (!lastUpdatedTime) return '';
   
-  const now = new Date();
-  const updated = new Date(lastUpdatedTime);
-  
-  if (isNaN(updated.getTime())) return '';
-  
-  const diffMs = now.getTime() - updated.getTime();
-  const diffMinutes = Math.floor(diffMs / (1000 * 60));
-  
-  if (diffMinutes === 0) {
-    return 'Just now';
-  } else if (diffMinutes < 60) {
-    return `${diffMinutes} min${diffMinutes === 1 ? '' : 's'} ago`;
-  } else {
-    const hours = Math.floor(diffMinutes / 60);
-    const mins = diffMinutes % 60;
-    if (mins === 0) {
-      return `${hours} hr${hours === 1 ? '' : 's'} ago`;
-    }
-    return `${hours} hr${hours === 1 ? '' : 's'} ${mins} min${mins === 1 ? '' : 's'} ago`;
+  try {
+    const updated = new Date(lastUpdatedTime);
+    
+    if (isNaN(updated.getTime())) return '';
+    
+    // Convert to user's local time and format as "3:05 AM"
+    const hours = updated.getHours();
+    const minutes = updated.getMinutes();
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    const displayHours = hours % 12 || 12;
+    const displayMinutes = minutes.toString().padStart(2, '0');
+    
+    return `${displayHours}:${displayMinutes} ${ampm}`;
+  } catch {
+    return '';
   }
- };
+};
 
- const [displayTime, setDisplayTime] = useState<string>(() => calculateDisplayTime(lastUpdated));
+ const [updateTimeDisplay, setUpdateTimeDisplay] = useState<string>(() => formatUpdateTime(lastUpdated));
 
  useEffect(() => {
-  setDisplayTime(calculateDisplayTime(lastUpdated));
-  
-  if (!lastUpdated) return;
-  
-  const interval = setInterval(() => {
-    setDisplayTime(calculateDisplayTime(lastUpdated));
-  }, 1000);
-  
-  return () => clearInterval(interval);
- }, [lastUpdated]);
+  setUpdateTimeDisplay(formatUpdateTime(lastUpdated));
+}, [lastUpdated]);
 
  const getUpdateStatus = () => {
   if (loading) {
@@ -384,17 +372,17 @@ const locationRequestedRef = useRef(false);
     return { status: 'error', message: 'Connection issue' };
   }
   
-  if (!lastUpdated) {
+  if (!lastUpdated || !updateTimeDisplay) {
     return { status: 'updated', message: 'Ready' };
   }
   
   return {
     status: 'updated',
-    message: `Updated ${displayTime}`
+    message: `Last updated: ${updateTimeDisplay}`
   };
- };
- const updateStatus = getUpdateStatus();
+};
 
+const updateStatus = getUpdateStatus();
 
   return (
     <main className="min-h-screen" style={{ background: theme.gradients.pageBackground }}>
@@ -451,7 +439,7 @@ const locationRequestedRef = useRef(false);
                   <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
                     <h2 className="text-lg sm:text-xl font-semibold text-amber-900">Canada Fire Risk Map</h2>
                   <div className="flex items-center space-x-2">
-                    {displayTime && (
+                    {updateTimeDisplay && (
                       <div 
                         className={`w-2.5 h-2.5 rounded-full shadow-sm ${
                           updateStatus.status === 'loading' ? 'bg-yellow-500 animate-pulse' : 
@@ -468,7 +456,7 @@ const locationRequestedRef = useRef(false);
                       </span>
                       {!loading && lastUpdated && (
                         <span className="text-xs text-amber-600 italic">
-                          Hourly updates (:05)
+                          Updates hourly (~:05)
                         </span>
                       )}
                     </div>
