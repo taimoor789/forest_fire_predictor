@@ -450,27 +450,29 @@ const locationRequestedRef = useRef(false);
                 <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between mb-3 gap-3">
                   <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
                     <h2 className="text-lg sm:text-xl font-semibold text-amber-900">Canada Fire Risk Map</h2>
-                    <div className="flex items-center space-x-2">
-                      {displayTime && (
-                        <div 
-                          className={`w-2.5 h-2.5 rounded-full shadow-sm ${
-                            updateStatus.status === 'loading' ? 'bg-yellow-500 animate-pulse' : 
-                            updateStatus.status === 'error' ? 'bg-red-500' : 
-                            'bg-green-500'
-                          }`}
-                          role="status"
-                          aria-label={`Data status: ${updateStatus.message}`}
-                        />
-                      )}
-                      <span className="text-xs text-amber-900 font-medium leading-none flex items-center h-2.5">
+                  <div className="flex items-center space-x-2">
+                    {displayTime && (
+                      <div 
+                        className={`w-2.5 h-2.5 rounded-full shadow-sm ${
+                          updateStatus.status === 'loading' ? 'bg-yellow-500 animate-pulse' : 
+                          updateStatus.status === 'error' ? 'bg-red-500' : 
+                          'bg-green-500'
+                        }`}
+                        role="status"
+                        aria-label={`Data status: ${updateStatus.message}`}
+                      />
+                    )}
+                    <div className="flex flex-col">
+                      <span className="text-xs text-amber-800 font-medium">
                         {updateStatus.message}
                       </span>
+                      {!loading && lastUpdated && (
+                        <span className="text-xs text-amber-600 italic">
+                          Hourly updates (:05)
+                        </span>
+                      )}
                     </div>
-                    {!loading && lastUpdated && (
-                      <div className="text-xs text-amber-700 italic mt-1">
-                          Updates hourly at :05 past each hour
-                      </div>
-                    )}
+                  </div>
                   </div>
                   <div className="flex items-center rounded-lg p-1" style={theme.styles.mapControlsBg}>
                     <button 
@@ -697,8 +699,8 @@ const locationRequestedRef = useRef(false);
           </div>
         </div>
       </div>
-      </div>
-      
+     </div>
+
       <footer className="shadow-inner mt-16" style={{ backgroundColor: 'rgba(139, 69, 19, 0.9)' }}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="text-center">
