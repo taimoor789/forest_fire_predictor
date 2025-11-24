@@ -188,73 +188,77 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
   }, [canadaGeoJSON, pointInPolygon]);
 
   const addUserLocationMarker = useCallback(() => {
-    if (!leafletMapRef.current || !window.L || !userLocation) return;
+  if (!leafletMapRef.current || !window.L || !userLocation) return;
 
-    if (userLocationMarkerRef.current) {
-      try {
-        if (leafletMapRef.current.hasLayer(userLocationMarkerRef.current)) {
-          leafletMapRef.current.removeLayer(userLocationMarkerRef.current);
-        }
-      } catch (e) {
-        logger.warn('Error removing user location marker:', e);
-      }
-      userLocationMarkerRef.current = null;
-    }
-
+  if (userLocationMarkerRef.current) {
     try {
-      const userLocationGroup = window.L.layerGroup();
-
-      const radarCircle = window.L.circle([userLocation.lat, userLocation.lon], {
-        radius: 80000,
-        fillColor: '#3b82f6',
-        fillOpacity: 0.15,
-        color: '#2563eb',
-        weight: 3,
-        opacity: 0.7,
-        interactive: false
-      });
-
-      const innerCircle = window.L.circle([userLocation.lat, userLocation.lon], {
-        radius: 40000,
-        fillColor: '#60a5fa',
-        fillOpacity: 0.25,
-        color: '#3b82f6',
-        weight: 2,
-        opacity: 0.8,
-        interactive: false
-      });
-
-      const userMarker = window.L.circleMarker([userLocation.lat, userLocation.lon], {
-        radius: 12,
-        fillColor: '#2563eb',
-        color: '#ffffff',
-        weight: 4,
-        opacity: 1,
-        fillOpacity: 1,
-        zIndexOffset: 10000
-      });
-
-      userMarker.bindPopup(`
-      <div style="min-width: 180px; font-family: system-ui; role: region; aria-label: User location marker;">
-        <h3 style="margin: 0 0 8px 0;">
-          Your Location
-        </h3>
-        <div style="font-size: 12px; color: #374151;">
-          <div style="margin-bottom: 4px;">${userLocation.city || 'Current Position'}</div>
-        </div>
-       </div>
-     `);
-
-      radarCircle.addTo(userLocationGroup);
-      innerCircle.addTo(userLocationGroup);
-      userMarker.addTo(userLocationGroup);
-
-      userLocationGroup.addTo(leafletMapRef.current);
-      userLocationMarkerRef.current = userLocationGroup;
-    } catch (error) {
-      logger.error('Error adding user location marker:', error);
+      if (leafletMapRef.current.hasLayer(userLocationMarkerRef.current)) {
+        leafletMapRef.current.removeLayer(userLocationMarkerRef.current);
+      }
+    } catch (e) {
+      logger.warn('Error removing user location marker:', e);
     }
-  }, []);
+    userLocationMarkerRef.current = null;
+  }
+
+  try {
+    const userLocationGroup = window.L.layerGroup();
+
+    const radarCircle = window.L.circle([userLocation.lat, userLocation.lon], {
+      radius: 80000,
+      fillColor: '#3b82f6',
+      fillOpacity: 0.15,
+      color: '#2563eb',
+      weight: 3,
+      opacity: 0.7,
+      interactive: false
+    });
+
+    const innerCircle = window.L.circle([userLocation.lat, userLocation.lon], {
+      radius: 40000,
+      fillColor: '#60a5fa',
+      fillOpacity: 0.25,
+      color: '#3b82f6',
+      weight: 2,
+      opacity: 0.8,
+      interactive: false
+    });
+
+    const userMarker = window.L.circleMarker([userLocation.lat, userLocation.lon], {
+      radius: 12,
+      fillColor: '#2563eb',
+      color: '#ffffff',
+      weight: 4,
+      opacity: 1,
+      fillOpacity: 1,
+      zIndexOffset: 10000
+    });
+
+    // FIX: Use userLocation.city directly (already formatted)
+    const locationName = userLocation.city || 'Your Location';
+
+    userMarker.bindPopup(`
+      <div style="min-width: 180px; font-family: system-ui;">
+        <h3 style="margin: 0 0 8px 0; font-weight: 600; color: #1f2937;">
+          ${locationName}
+        </h3>
+        <div style="font-size: 12px; color: #6b7280;">
+          <div>Latitude: ${userLocation.lat.toFixed(4)}°</div>
+          <div>Longitude: ${userLocation.lon.toFixed(4)}°</div>
+        </div>
+      </div>
+    `);
+
+    radarCircle.addTo(userLocationGroup);
+    innerCircle.addTo(userLocationGroup);
+    userMarker.addTo(userLocationGroup);
+
+    userLocationGroup.addTo(leafletMapRef.current);
+    userLocationMarkerRef.current = userLocationGroup;
+  } catch (error) {
+    logger.error('Error adding user location marker:', error);
+  }
+ }, [userLocation]);
 
   const loadScripts = useCallback(async () => {
     if (scriptsLoadedRef.current) return true;
@@ -657,19 +661,20 @@ const addHeatmapToMap = useCallback(() => {
   
   const updateVisualization = async () => {
     try {
-      logger.info('Data changed, updating map visualization...');
+      logger.info(`Map data changed, updating (${data?.length || 0} points)`);
       
+      // Force complete cleanup
       clearMarkers();
       clearHeatmap();
       
-      // Small delay to ensure cleanup completes
-      await new Promise(resolve => setTimeout(resolve, 50));
+      // Wait for cleanup to complete
+      await new Promise(resolve => setTimeout(resolve, 100));
       
       if (mapMode === 'markers' && data && data.length > 0) {
-        logger.info(`Adding ${data.length} markers to map`);
+        logger.info(`Rendering ${data.length} markers`);
         addMarkersToMap();
       } else if (mapMode === 'heatmap' && data && data.length > 0) {
-        logger.info(`Adding heatmap with ${data.length} points`);
+        logger.info(`Rendering heatmap with ${data.length} points`);
         addHeatmapToMap();
       }
     } catch (error) {

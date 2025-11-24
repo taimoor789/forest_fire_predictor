@@ -222,14 +222,18 @@ const HighRiskAreas: React.FC<{ data: FireRiskData[]; shouldShowSkeleton: boolea
 const FireRiskDashboard: React.FC = () => {
   const { data, loading, error, lastUpdated, modelInfo } = useFireRiskData();
   const shouldShowSkeleton = loading && (!data || data.length === 0);
-  
+
+  const LOCATION_STORAGE_KEY = 'userLocation';
+  const LOCATION_TIMESTAMP_KEY = 'userLocationTimestamp';
+
+  const [userLocation, setUserLocation] = useState<{ lat: number; lon: number; city?: string } | null>(null);
+  const [locationError, setLocationError] = useState<string | null>(null);
+  const [locationEnabled, setLocationEnabled] = useState(true);
   const [mapMode, setMapMode] = useState<'markers' | 'heatmap'>('markers');
   const [stationCount, setStationCount] = useState<number>(0);
   const [pendingMode, setPendingMode] = useState<'markers' | 'heatmap' | null>(null);
-  const [userLocation, setUserLocation] = useState<{ lat: number; lon: number; city?: string } | null>(null);
-  const [locationError, setLocationError] = useState<string | null>(null);
+
   const [nearestStations, setNearestStations] = useState<Array<{ station: FireRiskData; distance: number }>>([]);
-  const [locationEnabled, setLocationEnabled] = useState(true);
   const locationRequestedRef = useRef(false);
   const hasSetLocationRef = useRef(false);
 
@@ -250,109 +254,103 @@ const FireRiskDashboard: React.FC = () => {
     }, 2000); 
   };
 
-useEffect(() => {
-  // Guard: Only run once per session
-  if (locationRequestedRef.current) {
-    logger.info('Location already requested in this session');
+ useEffect(() => {
+  // Try to load from cache first
+  const loadCachedLocation = () => {
+    try {
+      const cached = localStorage.getItem(LOCATION_STORAGE_KEY);
+      const timestamp = localStorage.getItem(LOCATION_TIMESTAMP_KEY);
+      
+      if (cached && timestamp) {
+        const age = Date.now() - parseInt(timestamp);
+        // Cache valid for 7 days
+        if (age < 7 * 24 * 60 * 60 * 1000) {
+          const loc = JSON.parse(cached);
+          if (loc.city && loc.city !== 'Your Location') {
+            setUserLocation(loc);
+            logger.info('Using cached location:', loc.city);
+            return true;
+          }
+        }
+      }
+    } catch (e) {
+      logger.warn('Failed to load cached location:', e);
+    }
+    return false;
+  };
+
+  // If we have a valid cache, use it
+  if (loadCachedLocation()) {
     return;
   }
-  
-  locationRequestedRef.current = true;
 
+  // Otherwise request fresh location
   if (!navigator.geolocation) {
     setLocationError('Geolocation not supported');
     setLocationEnabled(false);
     return;
   }
 
-  logger.info('Requesting user location...');
+  logger.info('Requesting fresh location...');
 
   navigator.geolocation.getCurrentPosition(
-    (position) => {
-      // Guard: Prevent duplicate location sets
-      if (hasSetLocationRef.current) {
-        logger.info('Location already set, skipping duplicate');
-        return;
-      }
-      
+    async (position) => {
       const userLat = position.coords.latitude;
       const userLon = position.coords.longitude;
       
-      logger.info(`Location obtained: ${userLat}, ${userLon}`);
-      hasSetLocationRef.current = true;
+      logger.info(`Location: ${userLat}, ${userLon}`);
       
-      // Set initial location with "Your Location" placeholder
-      setUserLocation({ lat: userLat, lon: userLon, city: 'Your Location' });
-      setLocationError(null);
-      setLocationEnabled(true);
-      
-      // Fetch city name asynchronously (non-blocking)
-      const getCityName = async () => {
-        try {
-          const response = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${userLat}&lon=${userLon}`,
-            {
-              headers: { 'User-Agent': 'FireRiskDashboard/1.0' }
-            }
-          );
-          
-          if (!response.ok) {
-            throw new Error('Geocoding failed');
-          }
-          
-          const data = await response.json();
-          const city = data.address?.city || data.address?.town || data.address?.county || 'Your Location';
-          const province = data.address?.state || '';
-          
-          const displayName = province ? `${city}, ${province}` : city;
-          
-          // Only update if we still have the same location
-          setUserLocation(prev => {
-            if (!prev || (prev.lat === userLat && prev.lon === userLon)) {
-              return { ...prev!, city: displayName };
-            }
-            return prev;
-          });
-          
-          logger.info(`City name resolved: ${displayName}`);
-        } catch (err) {
-          logger.warn('Failed to get city name:', err);
-          // Keep "Your Location" as fallback
-        }
-      };
-      
-      // Delay city fetch slightly to avoid rate limiting
-      setTimeout(getCityName, 500);
+      try {
+        // Fetch city name immediately
+        const response = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${userLat}&lon=${userLon}`,
+          { headers: { 'User-Agent': 'FireRiskDashboard/1.0' } }
+        );
+        
+        if (!response.ok) throw new Error('Geocoding failed');
+        
+        const data = await response.json();
+        const city = data.address?.city || data.address?.town || data.address?.county || 'Unknown';
+        const province = data.address?.state || '';
+        const displayName = province ? `${city}, ${province}` : city;
+        
+        const location = { lat: userLat, lon: userLon, city: displayName };
+        
+        setUserLocation(location);
+        setLocationError(null);
+        setLocationEnabled(true);
+        
+        // Cache it
+        localStorage.setItem(LOCATION_STORAGE_KEY, JSON.stringify(location));
+        localStorage.setItem(LOCATION_TIMESTAMP_KEY, Date.now().toString());
+        
+        logger.info(`Location set: ${displayName}`);
+      } catch (err) {
+        logger.warn('Geocoding failed, using coordinates:', err);
+        
+        const location = { 
+          lat: userLat, 
+          lon: userLon, 
+          city: `${userLat.toFixed(2)}°, ${userLon.toFixed(2)}°` 
+        };
+        
+        setUserLocation(location);
+        localStorage.setItem(LOCATION_STORAGE_KEY, JSON.stringify(location));
+        localStorage.setItem(LOCATION_TIMESTAMP_KEY, Date.now().toString());
+      }
     },
     (error) => {
-      logger.error('Geolocation error:', error.code);
-      
-      let errorMsg = 'Location unavailable';
-      if (error.code === 1) {
-        errorMsg = 'Location permission denied';
-      } else if (error.code === 2) {
-        errorMsg = 'Location unavailable';
-      } else if (error.code === 3) {
-        errorMsg = 'Location request timed out';
-      }
-      
-      setLocationError(errorMsg);
+      logger.error('Geolocation error:', error);
+      setLocationError('Location unavailable');
       setLocationEnabled(false);
-      hasSetLocationRef.current = false; // Reset on error
     },
     {
-      enableHighAccuracy: false,
-      timeout: 15000,
-      maximumAge: 600000 // 10 minutes cache
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 0 
     }
   );
-
-  return () => {
-    logger.info('Geolocation component unmounting, resetting ref');
-    locationRequestedRef.current = false;
-    hasSetLocationRef.current = false;
-  };
- }, []);
+ }, []);  
 
  useEffect(() => {
   if (displayData && displayData.length > 0 && userLocation) {
@@ -527,7 +525,15 @@ const updateStatus = getUpdateStatus();
                   {mapMode === 'markers' ? 'Click markers to view detailed station risk information and weather conditions.' : 'Heat zones show fire risk density and intensity across Canadian regions.'}
                 </p>
               </div>
-              <MapComponent height="600px" className="border-2 border-amber-300 rounded-lg shadow-md" data={displayData || []} mapMode={mapMode} onStationCountUpdate={setStationCount} userLocation={userLocation} />
+             <MapComponent 
+                key={`map-${lastUpdated || 'initial'}`} 
+                height="600px" 
+                className="border-2 border-amber-300 rounded-lg shadow-md" 
+                data={displayData || []} 
+                mapMode={mapMode} 
+                onStationCountUpdate={setStationCount} 
+                userLocation={userLocation} 
+              />
             </div>
 
             <div className="rounded-lg shadow-lg backdrop-blur-sm p-6" style={{ backgroundColor: 'rgba(255, 248, 230, 0.85)', border: '1px solid rgba(218, 165, 32, 0.3)' }}>
