@@ -83,11 +83,16 @@ export interface FWIPredictionResponse {
 export class FireRiskAPI {
   // Private static helper method for making fetch requests with consistent error handling
   private static async fetchWithErrorHandling<T>(
-   url: string,
-   options?: RequestInit
-   ): Promise<T> {
-   try {
+  url: string,
+  options?: RequestInit
+): Promise<T> {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); 
+    
     const response = await fetch(`${API_BASE_URL}${url}`, {
+      ...options,
+      signal: controller.signal,
       headers: {
         'Content-Type': 'application/json',
         'Cache-Control': 'no-cache, no-store, must-revalidate',
@@ -95,8 +100,9 @@ export class FireRiskAPI {
         ...options?.headers,
       },
       cache: 'no-store',
-      ...options
     });
+
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
@@ -108,21 +114,29 @@ export class FireRiskAPI {
     }
 
     return await response.json();
-   } catch (error) {
+  } catch (error) {
     if (error instanceof ApiError) {
       throw error;
+    }
+    if ((error as Error).name === 'AbortError') {
+      throw new ApiError('TIMEOUT', 'Request timed out after 30 seconds');
     }
     throw new ApiError(
       'NETWORK_ERROR',
       'Failed to fetch data from server',
       error
     );
-   }
   }
+ }
 
-  static async getFireRiskPredictions(): Promise<{ data: FireRiskData[], batchTimestamp: string }> {
-    
-    const response = await this.fetchWithErrorHandling<FWIPredictionResponse>('/api/predict/fire-risk');
+ static async getFireRiskPredictions(retryCount = 0): Promise<{ data: FireRiskData[], batchTimestamp: string }> {
+  const MAX_RETRIES = 3;
+  const RETRY_DELAY = 2000;
+  
+  try {
+    const response = await this.fetchWithErrorHandling<FWIPredictionResponse>(
+      '/api/predict/fire-risk'
+    );
 
     const batchTimestamp = (response as any).last_updated || response.timestamp;
 
@@ -143,7 +157,6 @@ export class FireRiskAPI {
     }
 
     const transformedData: FireRiskData[] = [];
-    const invalidItems: any[] = [];
 
     response.data.forEach((item, index) => {
       const lat = Number(item.lat);
@@ -157,17 +170,6 @@ export class FireRiskAPI {
       const hasProvince = typeof item.province === 'string' && item.province.trim() !== '';
 
       if (!isValidLat || !isValidLon || !isValidRisk || !hasLocation || !hasProvince) {
-        invalidItems.push({
-          index,
-          item,
-          issues: {
-            invalidLat: !isValidLat,
-            invalidLon: !isValidLon,
-            invalidRisk: !isValidRisk,
-            missingLocation: !hasLocation,
-            missingProvince: !hasProvince
-          }
-        });
         return;
       }
 
@@ -209,7 +211,20 @@ export class FireRiskAPI {
       data: transformedData,
       batchTimestamp: batchTimestamp.split('.')[0] + 'Z' 
     };
+  } catch (error) {
+    if (retryCount < MAX_RETRIES && error instanceof ApiError && 
+        (error.code === 'NETWORK_ERROR' || error.message.includes('503'))) {
+      
+      logger.warn(`API call failed, retrying (${retryCount + 1}/${MAX_RETRIES})...`);
+      
+      await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * (retryCount + 1)));
+      
+      return this.getFireRiskPredictions(retryCount + 1);
+    }
+    
+    throw error;
   }
+ }
 
   static async getModelInfo(): Promise<{
     modelType: string;
@@ -356,11 +371,13 @@ export function useFireRiskData() {
       throw new Error('No valid Fire Weather Index data received from API');
     }
 
+    // Update state immediately
     setData(validatedData);
     setLastUpdated(backendTimestamp);
     setModelInfo(systemInfo);
     prevDataRef.current = validatedData;
 
+    // Cache data after state update
     if (typeof window !== 'undefined') {
       try {
         const compressedData = validatedData.map(item => ({
@@ -383,7 +400,7 @@ export function useFireRiskData() {
           setCachedData(validatedData);
           setShowCachedWarning(false);
         } else {
-          logger.warn('Data too large to cache, skipping localStorage');
+          logger.warn('Data too large to cache');
         }
       } catch (e) {
         if (e instanceof Error && e.name === 'QuotaExceededError') {
@@ -399,22 +416,26 @@ export function useFireRiskData() {
     logger.info(`Loaded ${validatedData.length} Fire Weather Index predictions`);
   } catch (err) {
     logger.error('Failed to fetch Fire Weather Index predictions:', err);
-    setError(err instanceof ApiError ? err.message : 'Failed to load Fire Weather Index predictions');
+    setError(err instanceof ApiError ? err.message : 'Failed to load predictions');
     
-    // Only use cache if fresh fetch fails
+    // CRITICAL: Use cached data if available, NEVER use mock data in production
     if (cachedData && cachedData.length > 0) {
+      const cacheAge = Date.now() - parseInt(localStorage.getItem(CACHE_TIMESTAMP_KEY) || '0');
+      const cacheAgeHours = cacheAge / (1000 * 60 * 60);
+      
+      logger.warn(`Using cached data (${cacheAgeHours.toFixed(1)} hours old)`);
       setData(cachedData);
-      setShowCachedWarning(true);
-      logger.info('Using cached data as fallback');
+      setShowCachedWarning(cacheAgeHours > 2); // Show warning if cache is >2 hours old
     } else {
-      try {
-        const { mockFireRiskData } = await import('./mockData');
-        setData(mockFireRiskData);
-        logger.info('Using mock data as fallback for Fire Weather Index');
-      } catch (mockError) {
-        logger.error('Failed to load mock data:', mockError);
-        setData([]);
-      }
+      // No cache available - keep trying to reconnect
+      logger.error('No cached data available, retrying in 5 seconds...');
+      setData([]);
+      
+      // Auto-retry after 5 seconds
+      setTimeout(() => {
+        logger.info('Retrying data fetch...');
+        fetchData();
+      }, 5000);
     }
   } finally {
     setLoading(false);
