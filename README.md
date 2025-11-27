@@ -1,4 +1,4 @@
-# 🔥 Forest Fire Risk Predictor
+# Forest Fire Risk Predictor
 
 > **Real-time wildfire risk monitoring across Canada using the Canadian Fire Weather Index System**
 
@@ -6,7 +6,7 @@ An interactive web application that provides hourly fire risk predictions for ov
 
 ---
 
-## 📊 Overview
+## Overview
 
 The Forest Fire Risk Predictor is a production-ready Next.js application that visualizes fire risk data on an interactive map, powered by Environment Canada's official Fire Weather Index algorithm.
 
@@ -19,9 +19,9 @@ The Forest Fire Risk Predictor is a production-ready Next.js application that vi
 
 ---
 
-## ✨ Features
+## Features
 
-### 🗺️ **Interactive Map Visualization**
+###  **Interactive Map Visualization**
 
 #### **Markers Mode**
 - 38 weather stations with aggregated risk data
@@ -36,7 +36,7 @@ The Forest Fire Risk Predictor is a production-ready Next.js application that vi
 - Smooth gradient visualization (green → yellow → red)
 - Regional risk patterns at a glance
 
-### 📈 **Risk Dashboard**
+###  **Risk Dashboard**
 
 #### **Statistics Panel**
 - **Very High** (≥80%) - Extreme fire danger
@@ -54,7 +54,7 @@ The Forest Fire Risk Predictor is a production-ready Next.js application that vi
 - Active weather stations count
 - Percentage breakdowns by risk level
 
-### 📍 **Smart Geolocation**
+###  **Smart Geolocation**
 
 #### **Auto-Detection**
 - Automatic location detection (with user permission)
@@ -66,7 +66,7 @@ The Forest Fire Risk Predictor is a production-ready Next.js application that vi
 - Distance in kilometers
 - Current risk level for each station
 
-### 🔗 **Official Resources**
+###  **Official Resources**
 Direct links to:
 - Canadian Wildland Fire Information System
 - Natural Resources Canada
@@ -75,7 +75,7 @@ Direct links to:
 
 ---
 
-## 🛠️ Tech Stack
+##  Tech Stack
 
 | Category | Technology | Purpose |
 |----------|-----------|---------|
@@ -89,7 +89,7 @@ Direct links to:
 
 ---
 
-## 🌐 Browser Support
+## Browser Support
 
 | Browser | Version | Support |
 |---------|---------|---------|
@@ -102,7 +102,7 @@ Direct links to:
 
 ---
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - **Environment and Climate Change Canada** - Fire Weather Index algorithm
 - **Natural Resources Canada** - Wildfire data and research
