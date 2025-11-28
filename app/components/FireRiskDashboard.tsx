@@ -223,6 +223,7 @@ const FireRiskDashboard: React.FC = () => {
   const { data, loading, error, lastUpdated, modelInfo } = useFireRiskData();
   const shouldShowSkeleton = loading && (!data || data.length === 0);
   const [showUpdateNotification, setShowUpdateNotification] = useState(false);
+  const prevLastUpdatedRef = useRef<string | null>(null);
 
   const LOCATION_STORAGE_KEY = 'userLocation';
   const LOCATION_TIMESTAMP_KEY = 'userLocationTimestamp';
@@ -416,18 +417,20 @@ const FireRiskDashboard: React.FC = () => {
 };
 
 useEffect(() => {
-  if (lastUpdated && !loading && data && data.length > 0) {
-    // Don't show notification on first load
-    const isFirstLoad = !localStorage.getItem('hasLoadedBefore');
-    
-    if (!isFirstLoad) {
-      setShowUpdateNotification(true);
-      setTimeout(() => setShowUpdateNotification(false), 3000);
-    }
-    
-    localStorage.setItem('hasLoadedBefore', 'true');
+  if (!lastUpdated || loading) {
+    return;
   }
-}, [lastUpdated, loading, data]);
+
+  if (prevLastUpdatedRef.current && prevLastUpdatedRef.current !== lastUpdated) {
+    // Only show notification if timestamp actually changed
+    logger.info(prevLastUpdatedRef.current, lastUpdated);
+    setShowUpdateNotification(true);
+    setTimeout(() => setShowUpdateNotification(false), 3000);
+  }
+
+  // Update the ref to track current timestamp
+  prevLastUpdatedRef.current = lastUpdated;
+}, [lastUpdated, loading]);
 
 const updateStatus = getUpdateStatus();
 
