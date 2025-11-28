@@ -222,6 +222,7 @@ const HighRiskAreas: React.FC<{ data: FireRiskData[]; shouldShowSkeleton: boolea
 const FireRiskDashboard: React.FC = () => {
   const { data, loading, error, lastUpdated, modelInfo } = useFireRiskData();
   const shouldShowSkeleton = loading && (!data || data.length === 0);
+  const [showUpdateNotification, setShowUpdateNotification] = useState(false);
 
   const LOCATION_STORAGE_KEY = 'userLocation';
   const LOCATION_TIMESTAMP_KEY = 'userLocationTimestamp';
@@ -414,11 +415,49 @@ const FireRiskDashboard: React.FC = () => {
   };
 };
 
+useEffect(() => {
+  if (lastUpdated && !loading && data && data.length > 0) {
+    // Don't show notification on first load
+    const isFirstLoad = !localStorage.getItem('hasLoadedBefore');
+    
+    if (!isFirstLoad) {
+      setShowUpdateNotification(true);
+      setTimeout(() => setShowUpdateNotification(false), 3000);
+    }
+    
+    localStorage.setItem('hasLoadedBefore', 'true');
+  }
+}, [lastUpdated, loading, data]);
+
 const updateStatus = getUpdateStatus();
 
   return (
     <main className="min-h-screen" style={{ background: theme.gradients.pageBackground }}>
+      {showUpdateNotification && (
+      <div 
+        className="fixed top-24 right-4 z-50 bg-green-600 text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-2 animate-slide-in"
+        style={{ 
+          animation: 'slideIn 0.3s ease-out',
+          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.06)'
+        }}
+      >
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <span className="font-medium">Data updated with latest fire risk information</span>
+      </div>
+    )}
       <style jsx global>{`
+        @keyframes slideIn {
+          from {
+            transform: translateX(400px);
+            opacity: 0;
+          }
+          to {
+            transform: translateX(0);
+            opacity: 1;
+          }
+        }
         .sidebar-scroll::-webkit-scrollbar {
           width: 8px;
         }

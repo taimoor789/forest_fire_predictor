@@ -315,6 +315,7 @@ export function useFireRiskData() {
   const prevDataRef = useRef<FireRiskData[] | null>(null);
   const [cachedData, setCachedData] = useState<FireRiskData[] | null>(null);
   const [showCachedWarning, setShowCachedWarning] = useState(false);
+  const checkIntervalRef = useRef<NodeJS.Timeout | null>(null); 
 
   // Load cached data on mount
   useEffect(() => {
@@ -341,106 +342,115 @@ export function useFireRiskData() {
   }, []);
 
   const fetchData = async () => {
-  try {
-    setLoading(true);
-    setError(null);
+    try {
+      setLoading(true);
+      setError(null);
 
-    const fireRiskResponse = await FireRiskAPI.getFireRiskPredictions();
-    const systemInfo = await FireRiskAPI.getModelInfo().catch(() => null);
+      const fireRiskResponse = await FireRiskAPI.getFireRiskPredictions();
+      const systemInfo = await FireRiskAPI.getModelInfo().catch(() => null);
 
-    const fireRiskData = fireRiskResponse.data;
-    const backendTimestamp = fireRiskResponse.batchTimestamp;
+      const fireRiskData = fireRiskResponse.data;
+      const backendTimestamp = fireRiskResponse.batchTimestamp;
 
-    const validatedData = fireRiskData.filter(item => {
-      const isValid = 
-        typeof item.lat === 'number' && 
-        typeof item.lon === 'number' &&
-        typeof item.riskLevel === 'number' &&
-        item.riskLevel >= 0 && 
-        item.riskLevel <= 1 &&
-        typeof item.location === 'string' &&
-        item.location.trim() !== '';
+      const validatedData = fireRiskData.filter(item => {
+        const isValid = 
+          typeof item.lat === 'number' && 
+          typeof item.lon === 'number' &&
+          typeof item.riskLevel === 'number' &&
+          item.riskLevel >= 0 && 
+          item.riskLevel <= 1 &&
+          typeof item.location === 'string' &&
+          item.location.trim() !== '';
 
-      if (!isValid) {
-        logger.warn("Invalid Fire Weather Index item", item);
+        if (!isValid) {
+          logger.warn("Invalid Fire Weather Index item", item);
+        }
+        return isValid;
+      });
+
+      if (validatedData.length === 0 && fireRiskData.length > 0) {
+        throw new Error('No valid Fire Weather Index data received from API');
       }
-      return isValid;
-    });
 
-    if (validatedData.length === 0 && fireRiskData.length > 0) {
-      throw new Error('No valid Fire Weather Index data received from API');
-    }
+      // Cache data with compression (only essential fields)
+      if (typeof window !== 'undefined') {
+        try {
+          const compressedData = validatedData.map(item => ({
+            id: item.id,
+            lat: item.lat,
+            lon: item.lon,
+            riskLevel: item.riskLevel,
+            location: item.location,
+            province: item.province,
+            temperature: item.temperature,
+            humidity: item.humidity,
+            windSpeed: item.windSpeed
+          }));
+          
+          const dataString = JSON.stringify(compressedData);
+          
+          if (dataString.length < 4 * 1024 * 1024) {
+            localStorage.setItem(CACHE_KEY, dataString);
+            localStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString());
+            setCachedData(validatedData);
+            setShowCachedWarning(false);
+          } else {
+            logger.warn('Data too large to cache, skipping localStorage');
+          }
+        } catch (e) {
+          if (e instanceof Error && e.name === 'QuotaExceededError') {
+            logger.warn('localStorage quota exceeded, clearing old cache');
+            localStorage.removeItem(CACHE_KEY);
+            localStorage.removeItem(CACHE_TIMESTAMP_KEY);
+          } else {
+            logger.error('Failed to cache data:', e);
+          }
+        }
+      }
 
-    // Update state immediately
-    setData(validatedData);
-    setLastUpdated(backendTimestamp);
-    setModelInfo(systemInfo);
-    prevDataRef.current = validatedData;
+      if (!lastUpdated || backendTimestamp !== lastUpdated) {
+        logger.info('✓ New data from backend, updating lastUpdated to:', backendTimestamp);
+        setLastUpdated(backendTimestamp);
+      } else {
+        logger.info('ℹ Same backend data, lastUpdated stays:', lastUpdated);
+      }
 
-    // Cache data after state update
-    if (typeof window !== 'undefined') {
+      setData(validatedData);
+      setModelInfo(systemInfo);
+      prevDataRef.current = validatedData;
+
+      logger.info(`Loaded ${validatedData.length} Fire Weather Index predictions`);
+    } catch (err) {
+      logger.error('Failed to fetch Fire Weather Index predictions:', err);
+      setError(err instanceof ApiError ? err.message : 'Failed to load Fire Weather Index predictions');
+      
       try {
-        const compressedData = validatedData.map(item => ({
-          id: item.id,
-          lat: item.lat,
-          lon: item.lon,
-          riskLevel: item.riskLevel,
-          location: item.location,
-          province: item.province,
-          temperature: item.temperature,
-          humidity: item.humidity,
-          windSpeed: item.windSpeed
-        }));
-        
-        const dataString = JSON.stringify(compressedData);
-        
-        if (dataString.length < 4 * 1024 * 1024) {
-          localStorage.setItem(CACHE_KEY, dataString);
-          localStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString());
-          setCachedData(validatedData);
-          setShowCachedWarning(false);
-        } else {
-          logger.warn('Data too large to cache');
-        }
-      } catch (e) {
-        if (e instanceof Error && e.name === 'QuotaExceededError') {
-          logger.warn('localStorage quota exceeded, clearing old cache');
-          localStorage.removeItem(CACHE_KEY);
-          localStorage.removeItem(CACHE_TIMESTAMP_KEY);
-        } else {
-          logger.error('Failed to cache data:', e);
-        }
+        const { mockFireRiskData } = await import('./mockData');
+        setData(mockFireRiskData);
+        logger.info('Using mock data as fallback for Fire Weather Index');
+      } catch (mockError) {
+        logger.error('Failed to load mock data:', mockError);
+        setData([]);
       }
+    } finally {
+      setLoading(false);
     }
+  };
 
-    logger.info(`Loaded ${validatedData.length} Fire Weather Index predictions`);
-  } catch (err) {
-    logger.error('Failed to fetch Fire Weather Index predictions:', err);
-    setError(err instanceof ApiError ? err.message : 'Failed to load predictions');
-    
-    // CRITICAL: Use cached data if available, NEVER use mock data in production
-    if (cachedData && cachedData.length > 0) {
-      const cacheAge = Date.now() - parseInt(localStorage.getItem(CACHE_TIMESTAMP_KEY) || '0');
-      const cacheAgeHours = cacheAge / (1000 * 60 * 60);
+  const checkForUpdates = async () => {
+    try {
+      const response = await FireRiskAPI.getFireRiskPredictions();
+      const newTimestamp = response.batchTimestamp;
       
-      logger.warn(`Using cached data (${cacheAgeHours.toFixed(1)} hours old)`);
-      setData(cachedData);
-      setShowCachedWarning(cacheAgeHours > 2); // Show warning if cache is >2 hours old
-    } else {
-      // No cache available - keep trying to reconnect
-      logger.error('No cached data available, retrying in 5 seconds...');
-      setData([]);
-      
-      // Auto-retry after 5 seconds
-      setTimeout(() => {
-        logger.info('Retrying data fetch...');
-        fetchData();
-      }, 5000);
+      if (lastUpdated && newTimestamp !== lastUpdated) {
+        logger.info('🔄 New data detected! Refreshing...');
+        await fetchData();
+      }
+    } catch (err) {
+      logger.warn('Failed to check for updates:', err);
     }
-  } finally {
-    setLoading(false);
-  }
- };
+  };
+
 
   useEffect(() => {
     fetchData();
@@ -469,10 +479,18 @@ export function useFireRiskData() {
       };
     }, timeUntilNext);
 
+    // Start checking for updates every minute
+    checkIntervalRef.current = setInterval(() => {
+      checkForUpdates();
+    }, 60 * 1000); // Check every 60 seconds
+
     return () => {
       clearTimeout(initialTimeout);
+      if (checkIntervalRef.current) {
+        clearInterval(checkIntervalRef.current);
+      }
     };
-  }, []);
+  }, [lastUpdated]);
 
   const displayData = data && data.length > 0 ? data : cachedData;
 
