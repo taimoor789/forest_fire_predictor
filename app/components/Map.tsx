@@ -1,14 +1,16 @@
-"use client";
+"use client"; //Ensures leaflet map only renders on the client 
 
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { FireRiskData } from '../types';
 
+//Dynamic import - Load LeafletMap only on client-side
 const LeafletMap = dynamic(
   () => import('./LeafletMap'),
   {
-    ssr: false,
+    ssr: false, //Don't render on server
     loading: () => (
+      // Loading placeholder while LeafletMap code is being downloaded
       <div className="h-full flex items-center justify-center bg-gray-100 rounded">
         <div className="text-center">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
@@ -38,19 +40,24 @@ const Map: React.FC<MapProps> = ({
   onStationCountUpdate,
   userLocation
 }) => {
+  // Track whether we're in browser or server
+  // Prevents hydration mismatches between server and client rendering
   const [isClient, setIsClient] = useState(false);
 
   useEffect(() => {
     setIsClient(true);
   }, []);
 
+  // useMemo prevents recalculation on every render
   const memoizedData = useMemo(() => {
     if (data && data.length > 0) {
       return data.map(location => ({
         ...location,
+        // Ensure coordinates are numbers
         lat: typeof location.lat === 'number' ? location.lat : parseFloat(location.lat as string),
         lon: typeof location.lon === 'number' ? location.lon : parseFloat(location.lon as string)
       })).filter(location => 
+        // Remove invalid coordinates
         !isNaN(location.lat) &&
         !isNaN(location.lon) &&
         location.lat >= -90 && location.lat <= 90 &&
@@ -58,14 +65,16 @@ const Map: React.FC<MapProps> = ({
       );
     }
     return [];
-  }, [data]);
+  }, [data]); // Only recalculate when data array changes
 
+  // useCallback prevents function recreation on every render
   const handleStationCountUpdate = useCallback((count: number) => {
     if (onStationCountUpdate) {
       onStationCountUpdate(count);
     }
   }, [onStationCountUpdate]);
 
+  // SSR guard - show loading state until client-side
   if (!isClient) {
     return (
       <div 
@@ -80,6 +89,7 @@ const Map: React.FC<MapProps> = ({
     );
   }
 
+  //Render leafletMap only on client side
   return (
     <div 
       className={`relative rounded-lg overflow-hidden ${className}`}
