@@ -13,7 +13,11 @@ import { theme } from '../lib/constants/theme';
 import { logger } from '../lib/utils/logger';
 
 
+//Subcomponent that displays risk distribution statistics and system info 
+//Props are passed down from parent to avoid prop drilling
 const StatisticsPanel: React.FC<{ data: FireRiskData[]; modelInfo: any; shouldShowSkeleton: boolean; userLocation: { lat: number; lon: number; city?: string } | null }> = ({ data, modelInfo, shouldShowSkeleton, userLocation }) => {
+
+  //useMemo only recalculates when data changes
   const stats = useMemo(() => {
     if (!data || data.length === 0) return { veryHigh: 0, high: 0, medium: 0, low: 0, veryLow: 0 }; 
     return {
@@ -31,6 +35,8 @@ const StatisticsPanel: React.FC<{ data: FireRiskData[]; modelInfo: any; shouldSh
         <TrendingUp className="w-5 h-5 mr-2 text-orange-700" />
         <h3 className="text-lg font-semibold text-amber-900">Risk Statistics</h3>
       </div>
+
+      {/* Grid layout - 2 columns on all screen sizes */}
       <div className="grid grid-cols-2 gap-4 mb-4">
         <div className="text-center p-3 bg-red-50 rounded-lg border border-red-200 shadow-sm">
           <div className="text-2xl font-bold text-red-600">{shouldShowSkeleton ? '...' : stats.veryHigh}</div>
@@ -67,6 +73,7 @@ const StatisticsPanel: React.FC<{ data: FireRiskData[]; modelInfo: any; shouldSh
   );
 };
 
+//Subcomponent legend for the markers mode
 const Legend: React.FC = () => {
   const riskLevels = [
     { label: 'Very High', color: '#d32f2f', range: '80-100%' },
@@ -95,6 +102,7 @@ const Legend: React.FC = () => {
   );
 };
 
+//Subcomponent heatmap legend for the heatmap mode
 const HeatmapLegend: React.FC = () => (
   <div className="rounded-lg shadow-lg backdrop-blur-sm p-4 mb-6" style={{ backgroundColor: 'rgba(255, 248, 230, 0.85)', border: '1px solid rgba(218, 165, 32, 0.3)' }}>
     <h3 className="text-sm font-semibold text-amber-900 mb-3">Heatmap Intensity</h3>
@@ -113,6 +121,7 @@ const HeatmapLegend: React.FC = () => (
   </div>
 );
 
+// Displays top 3 high-risk stations with aggregated data
 const HighRiskAreas: React.FC<{ data: FireRiskData[]; shouldShowSkeleton: boolean }> = ({ data, shouldShowSkeleton }) => {
   const recentAlerts = useMemo(() => {
     if (!data || data.length === 0) return [];
@@ -120,8 +129,10 @@ const HighRiskAreas: React.FC<{ data: FireRiskData[]; shouldShowSkeleton: boolea
     const stations = CANADIAN_STATIONS;
 
     const stationGroups = new Map<string, FireRiskData[]>();
+    // Initialize groups
     stations.forEach(station => stationGroups.set(station.name, []));
     
+    // Assign each grid cell to nearest station
     data.forEach(gridCell => {
       const lat = Number(gridCell.lat);
       const lon = Number(gridCell.lon);
@@ -141,6 +152,7 @@ const HighRiskAreas: React.FC<{ data: FireRiskData[]; shouldShowSkeleton: boolea
       stationGroups.get(nearestStation.name)!.push(gridCell);
     });
     
+    // Calculate average risk per station
     const stationAverages = stations.map(station => {
       const gridCells = stationGroups.get(station.name) || [];
       const avgRisk = gridCells.length > 0 
@@ -150,6 +162,7 @@ const HighRiskAreas: React.FC<{ data: FireRiskData[]; shouldShowSkeleton: boolea
       const displayPercent = Math.round(avgRisk * 100);
       const roundedRisk = displayPercent / 100;
       
+      // Categorize risk level
       let riskLevel: string;
       let color: string;
       if (roundedRisk >= 0.8) {
@@ -177,6 +190,7 @@ const HighRiskAreas: React.FC<{ data: FireRiskData[]; shouldShowSkeleton: boolea
       };
     });
     
+    //Return top 3 highest risk stations (minimum 20% risk to show)
     return stationAverages
       .sort((a, b) => b.avgRisk - a.avgRisk)
       .slice(0, 3)
@@ -220,42 +234,57 @@ const HighRiskAreas: React.FC<{ data: FireRiskData[]; shouldShowSkeleton: boolea
 };
 
 const FireRiskDashboard: React.FC = () => {
+  //Custom hook handles all API logic
   const { data, loading, error, lastUpdated, modelInfo } = useFireRiskData();
+
+  // Skeleton loading state: only show when initially loading with no data
   const shouldShowSkeleton = loading && (!data || data.length === 0);
+
+  //Update notification state
   const [showUpdateNotification, setShowUpdateNotification] = useState(false);
   const prevLastUpdatedRef = useRef<string | null>(null);
 
+  // localStorage keys for caching location (avoid re-fetching)
   const LOCATION_STORAGE_KEY = 'userLocation';
   const LOCATION_TIMESTAMP_KEY = 'userLocationTimestamp';
 
   const [userLocation, setUserLocation] = useState<{ lat: number; lon: number; city?: string } | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [locationEnabled, setLocationEnabled] = useState(true);
+
+  //Map visualization state
   const [mapMode, setMapMode] = useState<'markers' | 'heatmap'>('markers');
   const [stationCount, setStationCount] = useState<number>(0);
   const [pendingMode, setPendingMode] = useState<'markers' | 'heatmap' | null>(null);
 
+  //Nearest stations state (for user location)
   const [nearestStations, setNearestStations] = useState<Array<{ station: FireRiskData; distance: number }>>([]);
   const locationRequestedRef = useRef(false);
   const hasSetLocationRef = useRef(false);
 
+  //Memoized to prevent unnecessary recalculations
   const displayData = useMemo(() => {
    return data && data.length > 0 ? data : [];
   }, [data]);
   
+  //Map mode switching state
   const [isSwitchingMode, setIsSwitchingMode] = useState(false);
 
+  // Handle map mode toggle with loading state
   const handleModeSwitch = (mode: 'markers' | 'heatmap') => {
   if (mode === mapMode || isSwitchingMode) return;
     setIsSwitchingMode(true);
     setMapMode(mode);
     setPendingMode(mode);
+
+    // Reset loading state after transition
     setTimeout(() => {
       setPendingMode(null);
       setIsSwitchingMode(false);
     }, 2000); 
   };
 
+ // Runs once on mount to get user's location
  useEffect(() => {
   // Try to load from cache first
   const loadCachedLocation = () => {
@@ -295,6 +324,7 @@ const FireRiskDashboard: React.FC = () => {
 
   logger.info('Requesting fresh location...');
 
+  // Get user's coordinates
   navigator.geolocation.getCurrentPosition(
     async (position) => {
       const userLat = position.coords.latitude;
@@ -303,7 +333,7 @@ const FireRiskDashboard: React.FC = () => {
       logger.info(`Location: ${userLat}, ${userLon}`);
       
       try {
-        // Fetch city name immediately
+        // Reverse geocode to get city name
         const response = await fetch(
           `https://nominatim.openstreetmap.org/reverse?format=json&lat=${userLat}&lon=${userLon}`,
           { headers: { 'User-Agent': 'FireRiskDashboard/1.0' } }
@@ -330,6 +360,7 @@ const FireRiskDashboard: React.FC = () => {
       } catch (err) {
         logger.warn('Geocoding failed, using coordinates:', err);
         
+        // Fallback: just show coordinates
         const location = { 
           lat: userLat, 
           lon: userLon, 
@@ -349,17 +380,21 @@ const FireRiskDashboard: React.FC = () => {
     {
       enableHighAccuracy: true,
       timeout: 10000,
-      maximumAge: 0 
+      maximumAge: 0 // Don't use cached position
     }
   );
  }, []);  
 
+ // Calculate nearest stations (when data or location changes)
  useEffect(() => {
   if (displayData && displayData.length > 0 && userLocation) {
+    // Calculate distance from user to each grid cell
     const stationsWithDistance = displayData.map(gridCell => ({
       station: gridCell,
       distance: calculateDistance(userLocation.lat, userLocation.lon, gridCell.lat, gridCell.lon)
     }));
+
+    // Get 2 nearest stations
     const nearest = stationsWithDistance
       .sort((a, b) => a.distance - b.distance)
       .slice(0, 2);
@@ -370,6 +405,7 @@ const FireRiskDashboard: React.FC = () => {
   }
  }, [displayData, userLocation]);
 
+ // Converts ISO timestamp to "3:05 AM" format in user's local timezone
  const formatUpdateTime = (lastUpdatedTime: string | null): string => {
   if (!lastUpdatedTime) return '';
   
@@ -378,7 +414,7 @@ const FireRiskDashboard: React.FC = () => {
     
     if (isNaN(updated.getTime())) return '';
     
-    // Convert to user's local time and format as "3:05 AM"
+    // Convert to user's local time 
     const hours = updated.getHours();
     const minutes = updated.getMinutes();
     const ampm = hours >= 12 ? 'PM' : 'AM';
@@ -391,12 +427,14 @@ const FireRiskDashboard: React.FC = () => {
   }
 };
 
+ //Update time display state
  const [updateTimeDisplay, setUpdateTimeDisplay] = useState<string>(() => formatUpdateTime(lastUpdated));
 
  useEffect(() => {
   setUpdateTimeDisplay(formatUpdateTime(lastUpdated));
 }, [lastUpdated]);
 
+ //Update status indicator 
  const getUpdateStatus = () => {
   if (loading) {
     return { status: 'loading', message: 'Loading latest data...' };
@@ -416,15 +454,18 @@ const FireRiskDashboard: React.FC = () => {
   };
 };
 
+const updateStatus = getUpdateStatus();
+
 useEffect(() => {
   if (!lastUpdated || loading) {
     return;
   }
 
+  // Only show notification if timestamp actually changed
   if (prevLastUpdatedRef.current && prevLastUpdatedRef.current !== lastUpdated) {
-    // Only show notification if timestamp actually changed
     logger.info(prevLastUpdatedRef.current, lastUpdated);
     setShowUpdateNotification(true);
+    // Hide after 3s
     setTimeout(() => setShowUpdateNotification(false), 3000);
   }
 
@@ -432,10 +473,10 @@ useEffect(() => {
   prevLastUpdatedRef.current = lastUpdated;
 }, [lastUpdated, loading]);
 
-const updateStatus = getUpdateStatus();
-
+  //Main dashboard UI
   return (
     <main className="min-h-screen" style={{ background: theme.gradients.pageBackground }}>
+      {/* Update notification toast (top-right corner) */}
       {showUpdateNotification && (
       <div 
         className="fixed top-24 right-4 z-50 bg-green-600 text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-2 animate-slide-in"
@@ -450,6 +491,7 @@ const updateStatus = getUpdateStatus();
         <span className="font-medium">Data updated with latest fire risk information</span>
       </div>
     )}
+      {/* Global styles for animations and scrollbar */}
       <style jsx global>{`
         @keyframes slideIn {
           from {
@@ -477,6 +519,7 @@ const updateStatus = getUpdateStatus();
         }
       `}</style>
 
+      {/* Header Section */}
       <header className="shadow-md backdrop-blur-sm" style={theme.styles.header}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
           <div className="grid grid-cols-1 sm:grid-cols-3 items-center">
@@ -503,13 +546,17 @@ const updateStatus = getUpdateStatus();
           </div>
         </div>
       </header>
-            
+
+      {/* Main Content Area - 2 Column Layout */}   
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+          {/* Left Column - Map & Stats (3/4 width on large screens) */}
           <div className="lg:col-span-3 space-y-6">
+             {/* Map Panel */}
             <div className="rounded-lg shadow-lg backdrop-blur-sm p-6 mb-6" style={theme.styles.panel}>
               <div className="mb-4">
                 <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between mb-3 gap-3">
+                  {/* Map Title & Status Indicator */}
                   <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
                     <h2 className="text-lg sm:text-xl font-semibold text-amber-900">Canada Fire Risk Map</h2>
                   <div className="flex items-center space-x-2">
@@ -536,6 +583,8 @@ const updateStatus = getUpdateStatus();
                     </div>
                   </div>
                   </div>
+
+                  {/* Map Mode Toggle Buttons */}
                   <div className="flex items-center rounded-lg p-1" style={theme.styles.mapControlsBg}>
                     <button 
                     onClick={() => handleModeSwitch('markers')}
@@ -567,6 +616,7 @@ const updateStatus = getUpdateStatus();
                   {mapMode === 'markers' ? 'Click markers to view detailed station risk information and weather conditions.' : 'Heat zones show fire risk density and intensity across Canadian regions.'}
                 </p>
               </div>
+              {/* Map Component - Key prop forces re-render on data update */}
              <MapComponent 
                 key={`map-${lastUpdated || 'initial'}`} 
                 height="600px" 
@@ -578,6 +628,7 @@ const updateStatus = getUpdateStatus();
               />
             </div>
 
+            {/* National Overview Stats */}
             <div className="rounded-lg shadow-lg backdrop-blur-sm p-6" style={{ backgroundColor: 'rgba(255, 248, 230, 0.85)', border: '1px solid rgba(218, 165, 32, 0.3)' }}>
               <h3 className="text-lg font-semibold text-amber-900 mb-4">National Risk Overview</h3>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -600,12 +651,14 @@ const updateStatus = getUpdateStatus();
               </div>
             </div>
 
+            {/* Official Resources Section (links to government sites) */}
             <div className="rounded-lg shadow-lg backdrop-blur-sm p-5" style={{ backgroundColor: 'rgba(255, 248, 230, 0.85)', border: '1px solid rgba(218, 165, 32, 0.3)' }}>
               <h3 className="text-lg font-semibold text-amber-900 mb-3 flex items-center">
                 <ExternalLink className="w-5 h-5 mr-2 text-orange-700" />
                 Official Resources & Updates
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {/* Resource cards with hover effects */}
                 <a href="https://cwfis.cfs.nrcan.gc.ca/home" target="_blank" rel="noopener noreferrer"
                    className="group flex items-start p-3 bg-gradient-to-br from-red-50 to-orange-50 rounded-xl hover:shadow-lg transition-all duration-200 border border-red-200 hover:border-red-300">
                   <div className="flex-shrink-0 w-11 h-11 bg-white rounded-lg flex items-center justify-center shadow-sm group-hover:shadow-md transition-shadow mr-3">
@@ -676,8 +729,10 @@ const updateStatus = getUpdateStatus();
             </div>
           </div>
 
+          {/* Right Sidebar - Info Panels (1/4 width on large screens) */}
           <div className="lg:col-span-1 sidebar-scroll" style={theme.styles.sidebarScroll}>
             <div className="space-y-6">
+            {/* Nearest Stations Panel (shows if user location available) */}
             {userLocation && nearestStations.length > 0 && (
             <div className="rounded-lg shadow-lg backdrop-blur-sm p-6 mb-6" style={{ backgroundColor: 'rgba(255, 248, 230, 0.85)', border: '1px solid rgba(218, 165, 32, 0.3)' }}>
               <div className="flex items-center mb-4">
@@ -737,6 +792,7 @@ const updateStatus = getUpdateStatus();
               </div>
             </div>
            )}
+            {/* Location Error Warning */}
             {locationError && !userLocation && (
               <div className="rounded-lg shadow-lg backdrop-blur-sm p-4 mb-6" style={{ backgroundColor: 'rgba(254, 243, 199, 0.9)', border: '1px solid rgba(245, 158, 11, 0.3)' }}>
                 <div className="flex items-center text-sm text-amber-800">
@@ -745,9 +801,13 @@ const updateStatus = getUpdateStatus();
                 </div>
               </div>
             )}
+
+            {/* Render Heatmap/Marker Legend */}
             <StatisticsPanel data={displayData || []} modelInfo={modelInfo} shouldShowSkeleton={shouldShowSkeleton} userLocation={userLocation} />
             {mapMode === 'heatmap' ? <HeatmapLegend /> : <Legend />}
             <HighRiskAreas data={displayData || []} shouldShowSkeleton={shouldShowSkeleton} />
+
+            {/* About the System Panel */}
             <div className="rounded-lg shadow-lg backdrop-blur-sm p-6" style={{ backgroundColor: 'rgba(255, 248, 230, 0.85)', border: '1px solid rgba(218, 165, 32, 0.3)' }}>
               <h3 className="text-lg font-semibold text-amber-900 mb-4">About the System</h3>
               <div className="text-sm text-amber-800 space-y-3">
@@ -783,6 +843,7 @@ const updateStatus = getUpdateStatus();
       </div>
      </div>
 
+      {/* Footer */}
       <footer className="shadow-inner mt-16" style={{ backgroundColor: 'rgba(139, 69, 19, 0.9)' }}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="text-center">
