@@ -17,6 +17,7 @@ const StatisticsPanel: React.FC<{ data: FireRiskData[]; modelInfo: any; shouldSh
   const stats = useMemo(() => {
     if (!data || data.length === 0) return { extreme: 0, veryHigh: 0, high: 0, moderate: 0, low: 0, veryLow: 0 }; 
     
+    // Updated thresholds for FWI values (not percentages)
     return {
       extreme: data.filter(d => d.riskLevel >= 30).length,
       veryHigh: data.filter(d => d.riskLevel >= 18 && d.riskLevel < 30).length,
@@ -495,29 +496,40 @@ const updateStatus = getUpdateStatus();
         }
       `}</style>
 
+      {/* Header Section */}
       <header className="shadow-md backdrop-blur-sm" style={theme.styles.header}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
-          <div className="grid grid-cols-1 sm:grid-cols-3 items-center">
-            <div className="hidden sm:flex items-center justify-self-start" style={theme.styles.logo}>
-              <Image 
-                src="/assets/logo/ffp-logo.svg" 
-                alt="FFP Logo" 
-                width={180}
-                height={50}
-                className="h-22 w-auto"
-                priority
-                style={{ filter: 'drop-shadow(2px 2px 4px rgba(0,0,0,0.1))' }}
+          <div className="grid grid-cols-1 sm:grid-cols-3 items-center gap-4">
+            {/* Left Icon */}
+            <div className="hidden sm:flex items-center justify-start">
+              <img 
+                src="/favicon.ico" 
+                alt="Forest Fire Predictor"
+                className="w-12 h-12 sm:w-16 sm:h-16 lg:w-20 lg:h-20"
+                style={{ filter: 'drop-shadow(0 2px 4px rgba(139, 69, 19, 0.2))' }}
               />
             </div>
-            <div className="text-center justify-self-center mt-2 sm:mt-0 sm:col-start-2 sm:flex sm:flex-col sm:justify-center">
-              <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold tracking-tight whitespace-nowrap leading-tight mb-3" style={theme.styles.title}>
-                Canadian Fire Weather Index
+            {/* Center Text */}
+            <div className="text-center justify-self-center">
+              <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold tracking-tight whitespace-nowrap leading-tight mb-2" 
+                  style={theme.styles.title}>
+                Forest Fire Risk Predictor
               </h1>
-              <p className="text-xs sm:text-sm md:text-base font-medium max-w-3xl mx-auto" style={theme.styles.subtitle}>
-                Real-time fire danger monitoring across Canada
+              <p className="text-sm sm:text-base md:text-lg font-medium" 
+                
+                style={theme.styles.subtitle}>
+                Real-time fire danger assessment using Canadian Fire Weather Index
               </p>
             </div>
-            <div className="hidden sm:block sm:col-start-3" />
+            {/* Right Icon */}
+            <div className="hidden sm:flex items-center justify-end">
+              <img 
+                src="/favicon.ico" 
+                alt="Forest Fire Predictor"
+                className="w-12 h-12 sm:w-16 sm:h-16 lg:w-20 lg:h-20"
+                style={{ filter: 'drop-shadow(0 2px 4px rgba(139, 69, 19, 0.2))' }}
+              />
+            </div>
           </div>
         </div>
       </header>
@@ -797,7 +809,7 @@ const updateStatus = getUpdateStatus();
                 </div>
                 <div className="text-xs pt-3 border-t border-amber-200 bg-blue-50 p-3 rounded">
                   <p className="font-semibold text-blue-900 mb-1">What is FWI?</p>
-                  <p className="text-blue-800 leading-relaxed">The Fire Weather Index measures fire behavior potential (spread rate and intensity) if a fire starts. It does NOT predict the probability of ignition.</p>
+                  <p className="text-blue-800 leading-relaxed">The Fire Weather Index measures fire behavior potential (spread rate and intensity) if a fire starts. </p>
                 </div>
               </div>
             </div>
