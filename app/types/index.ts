@@ -2,7 +2,7 @@ export interface FireRiskData {
   id: string;
   lat: number;
   lon: number;
-  riskLevel: number; 
+  riskLevel: number;  
   location: string;
   province: string;
   lastUpdated?: string;
@@ -18,6 +18,7 @@ export interface FireRiskData {
   // Fire Weather Index specific properties
   dangerClass?: string;
   colorCode?: string;
+  historicalFireZone?: boolean;  
   fireWeatherIndices?: {
     ffmc: number;
     dmc: number;
@@ -33,10 +34,12 @@ export interface FireRiskData {
 export interface FWIModelInfo {
   modelType: string;
   methodology: string;
+  algorithm: string;
   r2Score: number;
   mse: number;
   mae: number;
-  riskRange: [number, number];
+  fwiRange: [number, number];
+  components: string[];
   version: string;
   lastTrained: string;
   confidence: string;
@@ -50,7 +53,7 @@ export interface FWIPredictionResponse {
     lon: number;
     location_name: string;
     province: string;
-    daily_fire_risk: number; 
+    fwi: number;  
     danger_class: string;
     color_code: string;
     weather_features: {
@@ -58,7 +61,6 @@ export interface FWIPredictionResponse {
       humidity: number;
       wind_speed: number;
       pressure: number;
-      fire_danger_index: number;
       rain_1h_mm: number;
       rain_3h_mm: number;
       snow_1h_mm: number;
@@ -80,6 +82,7 @@ export interface FWIPredictionResponse {
       fwi: number;
       dsr: number;
     };
+    historical_fire_zone: boolean;
     model_confidence: number;
     last_updated: string;
   }>;
@@ -87,21 +90,22 @@ export interface FWIPredictionResponse {
     model_type: string;
     version: string;
     methodology: string;
+    algorithm: string;
     r2_score: number; 
     mse: number;
     mae: number;
-    risk_range: [number, number];
-    features_used: string[];
+    fwi_range: [number, number];
+    components: string[];
   };
   processing_stats?: {
     total_locations: number;
     processed_successfully: number;
     processing_errors: number;
     processing_time_seconds: number;
-    risk_statistics: {
-      min_risk: number;
-      max_risk: number;
-      mean_risk: number;
+    fwi_statistics: {
+      min_fwi: number;
+      max_fwi: number;
+      mean_fwi: number;
       very_low_count: number;
       low_count: number;
       moderate_count: number;
@@ -119,9 +123,9 @@ export interface StationData {
   coordinates: [number, number];
   province: string;
   gridCells: FireRiskData[];
-  avgRisk: number;
-  maxRisk: number;
-  minRisk: number;
+  avgFWI: number;  
+  maxFWI: number; 
+  minFWI: number; 
   highRiskCount: number;
   mediumRiskCount: number;
   lowRiskCount: number;
@@ -133,7 +137,7 @@ export interface StationData {
   };
 }
 
-// Risk color scheme
+// Risk color scheme 
 export interface RiskColor {
   min: number;
   max: number;
@@ -187,15 +191,18 @@ export interface FireRiskResponse {
 
 // Statistics for the sidebar
 export interface StatisticsData {
+  extremeCount: number;
+  veryHighCount: number;
   highRiskCount: number;
-  mediumRiskCount: number;
-  lowRiskCount: number;
+  moderateCount: number;
+  lowCount: number;
+  veryLowCount: number;
   totalLocations: number;
   modelAccuracy: number;
-  modelRocAuc: number;
   averageConfidence: number;
   lastUpdated: string;
   modelVersion: string;
+  averageFWI: number;
 }
 
 // Alert/Warning Interface
@@ -203,7 +210,8 @@ export interface FireAlert {
   id: string;
   location: string;
   province: string;
-  riskLevel: 'LOW' | 'MED' | 'HIGH' | 'CRITICAL';
+  fwi: number;
+  dangerClass: 'Very Low' | 'Low' | 'Moderate' | 'High' | 'Very High' | 'Extreme';
   message: string;
   timestamp: string;
   isActive: boolean;
@@ -213,24 +221,26 @@ export interface FireAlert {
 // Utility Types
 export type BasicFireRiskData = Pick<FireRiskData, 'id' | 'lat' | 'lon' | 'riskLevel'>;
 export type PartialFireRiskData = Partial<FireRiskData>;
-export type RiskLevel = 'very-low' | 'low' | 'medium' | 'high' | 'very-high';
+export type DangerClass = 'Very Low' | 'Low' | 'Moderate' | 'High' | 'Very High' | 'Extreme';
 
-// Fire Weather Index thresholds
-export const FWI_RISK_THRESHOLDS = {
-  VERY_HIGH: 0.8,  
-  HIGH: 0.6,       
-  MEDIUM: 0.4,     
-  LOW: 0.2,        
-  VERY_LOW: 0.0    
+// Fire Weather Index thresholds (official Canadian FWI System)
+export const FWI_DANGER_THRESHOLDS = {
+  EXTREME: 30,
+  VERY_HIGH: 18,
+  HIGH: 8,
+  MODERATE: 4,
+  LOW: 2,
+  VERY_LOW: 0
 } as const;
 
-// Helper function to get risk category
-export function getRiskCategory(probability: number): keyof typeof FWI_RISK_THRESHOLDS {
-  if (probability >= FWI_RISK_THRESHOLDS.VERY_HIGH) return 'VERY_HIGH';
-  if (probability >= FWI_RISK_THRESHOLDS.HIGH) return 'HIGH';
-  if (probability >= FWI_RISK_THRESHOLDS.MEDIUM) return 'MEDIUM';
-  if (probability >= FWI_RISK_THRESHOLDS.LOW) return 'LOW';
-  return 'VERY_LOW';
+// Helper function to get danger class from FWI
+export function getDangerClass(fwi: number): DangerClass {
+  if (fwi >= FWI_DANGER_THRESHOLDS.EXTREME) return 'Extreme';
+  if (fwi >= FWI_DANGER_THRESHOLDS.VERY_HIGH) return 'Very High';
+  if (fwi >= FWI_DANGER_THRESHOLDS.HIGH) return 'High';
+  if (fwi >= FWI_DANGER_THRESHOLDS.MODERATE) return 'Moderate';
+  if (fwi >= FWI_DANGER_THRESHOLDS.LOW) return 'Low';
+  return 'Very Low';
 }
 
 // Heatmap options
@@ -242,29 +252,21 @@ export interface HeatLayerOptions {
   gradient?: { [key: number]: string };
 }
 
-// Helper function to get risk label
-export function getRiskLabel(probability: number): string {
-  const category = getRiskCategory(probability);
-  const percentage = Math.round(probability * 100);
-  
-  const labels = {
-    VERY_HIGH: `Very High (${percentage}%)`,
-    HIGH: `High (${percentage}%)`,
-    MEDIUM: `Medium (${percentage}%)`,
-    LOW: `Low (${percentage}%)`,
-    VERY_LOW: `Very Low (${percentage}%)`
-  };
-  
-  return labels[category];
+// Helper function to get danger class label with FWI
+export function getDangerLabel(fwi: number): string {
+  const dangerClass = getDangerClass(fwi);
+  const fwiDisplay = fwi.toFixed(1);
+  return `${dangerClass} (FWI ${fwiDisplay})`;
 }
 
 // Default color scheme for Fire Weather Index
-export const DEFAULT_RISK_COLORS: RiskColor[] = [
-  { min: 0.8, max: 1.0, color: '#d32f2f', label: 'Very High', textColor: '#ffffff' },
-  { min: 0.6, max: 0.8, color: '#f57c00', label: 'High', textColor: '#ffffff' },
-  { min: 0.4, max: 0.6, color: '#fbc02d', label: 'Medium', textColor: '#000000' },
-  { min: 0.2, max: 0.4, color: '#689f38', label: 'Low', textColor: '#ffffff' },
-  { min: 0.0, max: 0.2, color: '#388e3c', label: 'Very Low', textColor: '#ffffff' },
+export const DEFAULT_FWI_COLORS: RiskColor[] = [
+  { min: 30, max: 100, color: '#9C27B0', label: 'Extreme', textColor: '#ffffff' },
+  { min: 18, max: 30, color: '#F44336', label: 'Very High', textColor: '#ffffff' },
+  { min: 8, max: 18, color: '#FF9800', label: 'High', textColor: '#ffffff' },
+  { min: 4, max: 8, color: '#FFEB3B', label: 'Moderate', textColor: '#000000' },
+  { min: 2, max: 4, color: '#8BC34A', label: 'Low', textColor: '#ffffff' },
+  { min: 0, max: 2, color: '#4CAF50', label: 'Very Low', textColor: '#ffffff' },
 ];
 
 // Validation functions
@@ -274,9 +276,8 @@ export function isValidFWIPrediction(obj: unknown): obj is FWIPredictionResponse
     obj !== null &&
     typeof (obj as any).lat === 'number' &&
     typeof (obj as any).lon === 'number' &&
-    typeof (obj as any).daily_fire_risk === 'number' &&
-    (obj as any).daily_fire_risk >= 0 &&
-    (obj as any).daily_fire_risk <= 1 &&
+    typeof (obj as any).fwi === 'number' &&
+    (obj as any).fwi >= 0 &&
     typeof (obj as any).location_name === 'string' 
   );
 }
@@ -296,37 +297,39 @@ export interface ApiError {
 }
 
 // Danger class definitions
-export interface DangerClass {
-  name: string;
-  range: string;
+export interface DangerClassDefinition {
+  name: DangerClass;
+  fwiMin: number;
+  fwiMax: number;
   color: string;
   description: string;
 }
 
-export const DANGER_CLASSES: DangerClass[] = [
-  { name: "Very Low", range: "0-1 FWI", color: "#4CAF50", description: "Fires start easily but spread slowly" },
-  { name: "Low", range: "1-3 FWI", color: "#8BC34A", description: "Fires start easily and spread at low to moderate rates" },
-  { name: "Moderate", range: "3-7 FWI", color: "#FFEB3B", description: "Fires start easily and spread at moderate rates" },
-  { name: "High", range: "7-17 FWI", color: "#FF9800", description: "Fires start easily and spread at high rates" },
-  { name: "Very High", range: "17-30 FWI", color: "#F44336", description: "Fires start very easily and spread at very high rates" },
-  { name: "Extreme", range: "30+ FWI", color: "#9C27B0", description: "Fires start very easily and spread at extreme rates" }
+export const DANGER_CLASS_DEFINITIONS: DangerClassDefinition[] = [
+  { name: "Very Low", fwiMin: 0, fwiMax: 2, color: "#4CAF50", description: "Fuels will not ignite readily from small firebrands" },
+  { name: "Low", fwiMin: 2, fwiMax: 4, color: "#8BC34A", description: "Fires start easily and spread at low to moderate rates" },
+  { name: "Moderate", fwiMin: 4, fwiMax: 8, color: "#FFEB3B", description: "Fires start easily and spread at moderate rates" },
+  { name: "High", fwiMin: 8, fwiMax: 18, color: "#FF9800", description: "High fire intensity with serious control problems" },
+  { name: "Very High", fwiMin: 18, fwiMax: 30, color: "#F44336", description: "Very intense fires with rapid spread" },
+  { name: "Extreme", fwiMin: 30, fwiMax: 100, color: "#9C27B0", description: "Extremely intense, fast-moving fires" }
 ];
 
-// Helper to get danger class by FWI value
-export function getDangerClassByFWI(fwi: number): DangerClass {
-  if (fwi < 1) return DANGER_CLASSES[0];
-  if (fwi < 3) return DANGER_CLASSES[1];
-  if (fwi < 7) return DANGER_CLASSES[2];
-  if (fwi < 17) return DANGER_CLASSES[3];
-  if (fwi < 30) return DANGER_CLASSES[4];
-  return DANGER_CLASSES[5];
+// Helper to get danger class definition by FWI value
+export function getDangerClassDefinition(fwi: number): DangerClassDefinition {
+  if (fwi < 2) return DANGER_CLASS_DEFINITIONS[0];
+  if (fwi < 4) return DANGER_CLASS_DEFINITIONS[1];
+  if (fwi < 8) return DANGER_CLASS_DEFINITIONS[2];
+  if (fwi < 18) return DANGER_CLASS_DEFINITIONS[3];
+  if (fwi < 30) return DANGER_CLASS_DEFINITIONS[4];
+  return DANGER_CLASS_DEFINITIONS[5];
 }
 
-// Helper to get color by risk level
-export function getColorByRiskLevel(riskLevel: number): string {
-  if (riskLevel >= 0.8) return '#d32f2f';
-  if (riskLevel >= 0.6) return '#f57c00';
-  if (riskLevel >= 0.4) return '#fbc02d';
-  if (riskLevel >= 0.2) return '#689f38';
-  return '#388e3c';
+// Helper to get color by FWI level
+export function getColorByFWI(fwi: number): string {
+  if (fwi >= 30) return '#9C27B0';
+  if (fwi >= 18) return '#F44336';
+  if (fwi >= 8) return '#FF9800';
+  if (fwi >= 4) return '#FFEB3B';
+  if (fwi >= 2) return '#8BC34A';
+  return '#4CAF50';
 }
