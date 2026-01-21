@@ -7,7 +7,7 @@ import { logger } from '../lib/utils/logger';
 
 declare global {
   interface Window {
-    L: any; // Leaflet library loaded from CDN
+    L: any;
   }
 }
 
@@ -28,32 +28,21 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
   onStationCountUpdate,
   userLocation
 }) => {
-  //States and refs, persistent references that don't trigger re-renders
-
-  // DOM reference to the map container div
   const mapRef = useRef<HTMLDivElement>(null);
-  // Reference to the actual Leaflet map instance
   const leafletMapRef = useRef<any>(null);
-  // Array of all markers/layers currently on the map 
   const markersRef = useRef<any[]>([]);
-  // Reference to heatmap layer (when in heatmap mode)
   const heatmapLayerRef = useRef<any>(null);
-  // Reference to user location marker
   const userLocationMarkerRef = useRef<any>(null);
-  // Flags to prevent race conditions and double initialization
   const isInitializedRef = useRef(false);
   const isCleaningUpRef = useRef(false);
   const scriptsLoadedRef = useRef(false);
-  // Canada boundary data (fetched from GeoJSON)
   const [canadaGeoJSON, setCanadaGeoJSON] = useState<any>(null);
   const [boundaryStatus, setBoundaryStatus] = useState<string>('Loading boundaries...');
 
-  // Fetches GeoJSON data to filter points inside Canada
   const loadCanadaBoundary = useCallback(async () => {
     setBoundaryStatus('Loading Canada GeoJSON...');
     
     try {
-      // Try multiple GeoJSON sources (fallback if one fails)
       const sources = [
         'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_admin_0_countries.geojson',
         'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson',
@@ -62,7 +51,6 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
 
       let canadaFeature = null;
 
-      // Try each source until we find Canada data
       for (const url of sources) {
         try {
           const response = await fetch(url);
@@ -70,7 +58,6 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
           
           const worldData = await response.json();
           
-          // Find Canada in the world countries dataset
           if (worldData.features) {
             canadaFeature = worldData.features.find((feature: any) => 
               feature.properties &&
@@ -136,34 +123,27 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
     }
   }, []);
 
-  // Ray casting algorithm - checks if point is inside polygon
-  // Uses Jordan curve theorem: ray from point crosses boundary odd times = inside
   const pointInPolygon = useCallback((point: [number, number], polygon: number[][]): boolean => {
     const [x, y] = point;
     let inside = false;
     
-    // Check each edge of the polygon
     for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
       const [xi, yi] = polygon[i];
       const [xj, yj] = polygon[j];
       
-      // Ray casting: does horizontal ray from point intersect this edge?
       if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) {
-        inside = !inside; // Toggle inside/outside
+        inside = !inside;
       }
     }
     
     return inside;
   }, []);
 
-  //Check if coordinates are in Canada
   const isInCanada = useCallback((lat: number, lon: number): boolean => {
-    // Quick bounding box check 
     if (lat < 41.5 || lat > 83.6 || lon < -141.1 || lon > -52.5) {
       return false;
     }
 
-    // If no GeoJSON loaded, use simple bounding box
     if (!canadaGeoJSON || !canadaGeoJSON.geometry) {
       return lat >= 42 && lat <= 83.5 && lon >= -141 && lon <= -53;
     }
@@ -171,12 +151,10 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
     try {
       const point: [number, number] = [lon, lat];
       
-      // Handle MultiPolygon (Canada has islands and territories)
       if (canadaGeoJSON.geometry.type === 'MultiPolygon') {
         for (const polygon of canadaGeoJSON.geometry.coordinates) {
           const exteriorRing = polygon[0];
           if (pointInPolygon(point, exteriorRing)) {
-            // Check if point is in a hole (lakes, etc.)
             let inHole = false;
             for (let i = 1; i < polygon.length; i++) {
               if (pointInPolygon(point, polygon[i])) {
@@ -193,7 +171,6 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
       } else if (canadaGeoJSON.geometry.type === 'Polygon') {
         const exteriorRing = canadaGeoJSON.geometry.coordinates[0];
         if (pointInPolygon(point, exteriorRing)) {
-          // Check holes
           for (let i = 1; i < canadaGeoJSON.geometry.coordinates.length; i++) {
             if (pointInPolygon(point, canadaGeoJSON.geometry.coordinates[i])) {
               return false;
@@ -210,11 +187,9 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
     }
   }, [canadaGeoJSON, pointInPolygon]);
 
-  //Add User Location Marker
   const addUserLocationMarker = useCallback(() => {
   if (!leafletMapRef.current || !window.L || !userLocation) return;
 
-  // Remove existing marker
   if (userLocationMarkerRef.current) {
     try {
       if (leafletMapRef.current.hasLayer(userLocationMarkerRef.current)) {
@@ -227,10 +202,8 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
   }
 
   try {
-    // Create a layer group for user location (circle + marker)
     const userLocationGroup = window.L.layerGroup();
 
-    // Outer radar circle (80km radius)
     const radarCircle = window.L.circle([userLocation.lat, userLocation.lon], {
       radius: 80000,
       fillColor: '#3b82f6',
@@ -241,7 +214,6 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
       interactive: false
     });
 
-    // Inner circle (40km radius)
     const innerCircle = window.L.circle([userLocation.lat, userLocation.lon], {
       radius: 40000,
       fillColor: '#60a5fa',
@@ -252,7 +224,6 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
       interactive: false
     });
 
-    // User marker (blue dot)
     const userMarker = window.L.circleMarker([userLocation.lat, userLocation.lon], {
       radius: 12,
       fillColor: '#2563eb',
@@ -260,13 +231,11 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
       weight: 4,
       opacity: 1,
       fillOpacity: 1,
-      zIndexOffset: 10000 // Always on top
+      zIndexOffset: 10000
     });
 
-    //Use userLocation.city directly (already formatted)
     const locationName = userLocation.city || 'Your Location';
 
-    // Popup for user location
     userMarker.bindPopup(`
       <div style="min-width: 180px; font-family: system-ui;">
         <h3 style="margin: 0 0 8px 0; font-weight: 600; color: #1f2937;">
@@ -279,12 +248,10 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
       </div>
     `);
 
-    // Add all layers to group
     radarCircle.addTo(userLocationGroup);
     innerCircle.addTo(userLocationGroup);
     userMarker.addTo(userLocationGroup);
 
-    // Add group to map
     userLocationGroup.addTo(leafletMapRef.current);
     userLocationMarkerRef.current = userLocationGroup;
   } catch (error) {
@@ -292,12 +259,10 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
   }
  }, [userLocation]);
 
-  //Load Leaflet CSS/JS from CDN (avoid SSR issues with Next.js)
   const loadScripts = useCallback(async () => {
     if (scriptsLoadedRef.current) return true;
 
     try {
-      //Load leaflet CSS
       if (!document.querySelector('link[href*="leaflet.css"]')) {
         const cssLink = document.createElement('link');
         cssLink.rel = 'stylesheet';
@@ -305,7 +270,6 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
         document.head.appendChild(cssLink);
       }
 
-      // Load main Leaflet JS
       if (!window.L) {
         const script = document.createElement('script');
         script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
@@ -316,7 +280,6 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
         });
       }
 
-      // Load Leaflet heatmap plugin
       if (!window.L?.heatLayer) {
         const heatScript = document.createElement('script');
         heatScript.src = 'https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js';
@@ -335,7 +298,6 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
     }
   }, []);
 
-  // Removes all Leaflet layers and destroys map instance
   const cleanupMap = useCallback(() => {
   if (isCleaningUpRef.current) return;
   isCleaningUpRef.current = true;
@@ -343,15 +305,14 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
   try {
     if (leafletMapRef.current) {
       try {
-        leafletMapRef.current.off();//Remove all event listeners
-        leafletMapRef.current.remove(); //Destroy map instance
+        leafletMapRef.current.off();
+        leafletMapRef.current.remove();
       } catch {
-        // Ignore errors during cleanup
+        // Ignore
       }
       leafletMapRef.current = null;
     }
 
-    // Clear all references
     markersRef.current = [];
     heatmapLayerRef.current = null;
     userLocationMarkerRef.current = null;
@@ -362,7 +323,6 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
   }
  }, []); 
 
- //Creates colored rectangles for each grid cell (0.6° × 0.6°)
 const addHeatmapToMap = useCallback(() => {
   if (!leafletMapRef.current || !window.L) return;
 
@@ -371,7 +331,6 @@ const addHeatmapToMap = useCallback(() => {
     return;
   }
 
-  // Clear existing markers
   if (markersRef.current.length > 0) {
     markersRef.current.forEach(layer => {
       try {
@@ -385,7 +344,6 @@ const addHeatmapToMap = useCallback(() => {
     markersRef.current = [];
   }
 
-  // Filter data to only Canadian points
   const canadianData = data.filter(point => {
     const lat = Number(point.lat);
     const lon = Number(point.lon);
@@ -394,21 +352,19 @@ const addHeatmapToMap = useCallback(() => {
     return isInCanada(lat, lon);
   });
 
-  const rectangleSize = 0.6; // 0.6 degrees (~50-60km)
+  const rectangleSize = 0.6;
   const halfSize = rectangleSize / 2;
   const rectanglesToAdd: any[] = [];
 
-  // Create rectangle for each grid cell
   canadianData.forEach((point) => {
     const lat = Number(point.lat);
     const lon = Number(point.lon);
-    const risk = Number(point.riskLevel);
+    const fwi = Number(point.riskLevel);  // This is now FWI value
 
-    if (isNaN(lat) || isNaN(lon) || isNaN(risk)) return;
+    if (isNaN(lat) || isNaN(lon) || isNaN(fwi)) return;
 
-    const color = getRiskColor(risk);
+    const color = getRiskColor(fwi);  // Get color based on FWI
 
-    // Define rectangle bounds
     const bounds = [
       [lat - halfSize, lon - halfSize],
       [lat + halfSize, lon + halfSize]
@@ -426,7 +382,6 @@ const addHeatmapToMap = useCallback(() => {
     rectanglesToAdd.push(rectangle);
   });
 
-  // Batch add rectangles (better performance)
   requestAnimationFrame(() => {
     const layerGroup = window.L.layerGroup(rectanglesToAdd);
     layerGroup.addTo(leafletMapRef.current);
@@ -436,14 +391,12 @@ const addHeatmapToMap = useCallback(() => {
     setBoundaryStatus(`Coverage: ${rectanglesToAdd.length} areas`);
     if (onStationCountUpdate) onStationCountUpdate(rectanglesToAdd.length);
     
-    // Add user location on top
     if (userLocation) {
       requestAnimationFrame(() => addUserLocationMarker());
     }
   });
  }, [data, isInCanada, getRiskColor, onStationCountUpdate, userLocation, addUserLocationMarker]);
 
- //Clear heatmap function
   const clearHeatmap = useCallback(() => {
     if (heatmapLayerRef.current && leafletMapRef.current) {
       try {
@@ -458,19 +411,16 @@ const addHeatmapToMap = useCallback(() => {
     }
   }, []);
 
-  //Create Station Data (Aggregates grid cells by nearest station)
   const createStationData = useCallback(() => {
     if (!data || data.length === 0) return [];
     
     const stations = CANADIAN_STATIONS;
     const stationGroups = new Map<string, FireRiskData[]>();
     
-    // Initialize empty groups
     stations.forEach(station => {
       stationGroups.set(station.name, []);
     });
     
-    // Assign each grid cell to nearest station
     data.forEach(gridCell => {
       const lat = Number(gridCell.lat);
       const lon = Number(gridCell.lon);
@@ -493,24 +443,22 @@ const addHeatmapToMap = useCallback(() => {
     
     const stationData: FireRiskData[] = [];
   
-    // Calculate average risk for each station
     stations.forEach((station) => {
       const gridCells = stationGroups.get(station.name) || [];
       
-      let avgRiskLevel = 0.1;
+      // Calculate average FWI 
+      let avgFWI = 0.1;
       let avgTemperature = 15;
       let avgHumidity = 60;
       let avgWindSpeed = 10;
       let avgConfidence = 0.7;
-      let avgFireDangerIndex = 0.3;
       
       if (gridCells.length > 0) {
-        avgRiskLevel = gridCells.reduce((sum, cell) => sum + cell.riskLevel, 0) / gridCells.length;
+        avgFWI = gridCells.reduce((sum, cell) => sum + cell.riskLevel, 0) / gridCells.length;
         avgTemperature = gridCells.reduce((sum, cell) => sum + (cell.temperature || 15), 0) / gridCells.length;
         avgHumidity = gridCells.reduce((sum, cell) => sum + (cell.humidity || 60), 0) / gridCells.length;
         avgWindSpeed = gridCells.reduce((sum, cell) => sum + (cell.windSpeed || 10), 0) / gridCells.length;
         avgConfidence = gridCells.reduce((sum, cell) => sum + (cell.modelConfidence || 0.7), 0) / gridCells.length;
-        avgFireDangerIndex = gridCells.reduce((sum, cell) => sum + (cell.fireDangerIndex || 0.3), 0) / gridCells.length;
       }
       
       const stationAggregate: FireRiskData = {
@@ -519,12 +467,12 @@ const addHeatmapToMap = useCallback(() => {
         lon: station.lon,
         location: station.name,
         province: station.province,
-        riskLevel: Math.round(avgRiskLevel * 100) / 100, 
+        riskLevel: Math.round(avgFWI * 10) / 10,  // Round FWI to 1 decimal
         temperature: Math.round(avgTemperature * 10) / 10,
         humidity: Math.round(avgHumidity * 10) / 10,
         windSpeed: Math.round(avgWindSpeed * 10) / 10,
         modelConfidence: avgConfidence,
-        fireDangerIndex: avgFireDangerIndex,
+        fireDangerIndex: avgFWI,
         gridCellsCount: gridCells.length,
         lastUpdated: new Date().toISOString()
       };
@@ -535,7 +483,6 @@ const addHeatmapToMap = useCallback(() => {
     return stationData;
   }, [data]);
 
-  //Clear markers function
   const clearMarkers = useCallback(() => {
     if (!leafletMapRef.current) return;
     
@@ -552,7 +499,6 @@ const addHeatmapToMap = useCallback(() => {
     markersRef.current = [];
   }, []);
 
-  //Add markers to map for the station view
   const addMarkersToMap = useCallback(() => {
     if (!leafletMapRef.current || !window.L) return;
 
@@ -566,7 +512,9 @@ const addHeatmapToMap = useCallback(() => {
 
       if (isNaN(lat) || isNaN(lon)) return;
 
-      const color = getRiskColor(station.riskLevel);
+      const fwi = station.riskLevel;  
+      const color = getRiskColor(fwi);
+      const dangerClass = getRiskLabel(fwi);
 
       try {
         const marker = window.L.circleMarker([lat, lon], {
@@ -579,7 +527,6 @@ const addHeatmapToMap = useCallback(() => {
           zIndexOffset: 100
         });
 
-        // HTML popup content
         const popupContent = `
           <div style="min-width: 220px; font-family: system-ui;">
             <h3 style="margin: 0 0 8px 0; font-size: 16px; font-weight: 600; color: #1f2937;">
@@ -587,11 +534,11 @@ const addHeatmapToMap = useCallback(() => {
             </h3>
             <div style="font-size: 14px; line-height: 1.4; color: #374151;">
               <div style="margin-bottom: 6px; padding: 4px 8px; background-color: ${color}; color: white; border-radius: 4px; font-weight: 500;">
-                <strong>Fire Risk:</strong> ${getRiskLabel(station.riskLevel)} (${Math.round(station.riskLevel * 100)}%)
+                <strong>FWI:</strong> ${fwi.toFixed(1)} - ${dangerClass}
               </div>
-              <div style="margin-bottom: 4px;"><strong>Temperature:</strong> ${station.temperature}°C</div>
-              <div style="margin-bottom: 4px;"><strong>Humidity:</strong> ${station.humidity}%</div>
-              <div style="margin-bottom: 4px;"><strong>Wind Speed:</strong> ${station.windSpeed} km/h</div>
+              <div style="margin-bottom: 4px;"><strong>Temperature:</strong> ${station.temperature?.toFixed(1)}°C</div>
+              <div style="margin-bottom: 4px;"><strong>Humidity:</strong> ${station.humidity?.toFixed(0)}%</div>
+              <div style="margin-bottom: 4px;"><strong>Wind Speed:</strong> ${station.windSpeed?.toFixed(1)} km/h</div>
               <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
                 <div><strong>Data Points:</strong> ${station.gridCellsCount || 0} locations</div>
               </div>
@@ -625,36 +572,30 @@ const addHeatmapToMap = useCallback(() => {
     if (userLocation) {
       requestAnimationFrame(() => addUserLocationMarker());
     }
-  }, []);
+  }, [createStationData, clearMarkers, onLocationClick, onStationCountUpdate, userLocation, addUserLocationMarker]);
 
-  //Initialize Map (runs once on mount)
   useEffect(() => {
     if (!mapRef.current || isInitializedRef.current || isCleaningUpRef.current) return;
 
     const initializeMap = async () => {
       try {
-        // Load Leaflet scripts
         const scriptsLoaded = await loadScripts();
         if (!scriptsLoaded) {
           throw new Error('Failed to load required scripts');
         }
 
-        // Load Canada boundary
         await loadCanadaBoundary();
 
-        // Check if DOM element still exists
         if (!mapRef.current || !mapRef.current.parentNode) {
           return;
         }
 
-        // Initialize Leaflet map
         if (window.L && !isInitializedRef.current) {
           const canadaBounds = window.L.latLngBounds(
             window.L.latLng(41.5, -141.1),
             window.L.latLng(83.6, -52.5)
           );
 
-          // Clear any existing Leaflet instance on this DOM element
           const mapElement = mapRef.current as any;
           if (mapElement._leaflet_id) {
             delete mapElement._leaflet_id;
@@ -674,7 +615,6 @@ const addHeatmapToMap = useCallback(() => {
             keyboard: true
           });
 
-          // Add OpenStreetMap tiles
           const tileLayer = window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; OpenStreetMap contributors',
             maxZoom: 18
@@ -684,7 +624,6 @@ const addHeatmapToMap = useCallback(() => {
 
           isInitializedRef.current = true;
 
-          // Add initial visualization after delay
           if (data && data.length > 0) {
             setTimeout(() => {
               try {
@@ -707,7 +646,6 @@ const addHeatmapToMap = useCallback(() => {
 
     initializeMap();
 
-    // Cleanup on unmount
     return () => {
       const cleanup = async () => {
         if (!isCleaningUpRef.current && leafletMapRef.current) {
@@ -718,7 +656,6 @@ const addHeatmapToMap = useCallback(() => {
     };
   }, []);
 
-  //Update visualization when data/mode changes
   useEffect(() => {
   if (!isInitializedRef.current || !leafletMapRef.current || isCleaningUpRef.current) return;
   
@@ -726,11 +663,9 @@ const addHeatmapToMap = useCallback(() => {
     try {
       logger.info(`Map data changed, updating (${data?.length || 0} points)`);
       
-      // Force complete cleanup
       clearMarkers();
       clearHeatmap();
       
-      // Wait for cleanup to complete
       await new Promise(resolve => setTimeout(resolve, 100));
       
       if (mapMode === 'markers' && data && data.length > 0) {
@@ -749,7 +684,6 @@ const addHeatmapToMap = useCallback(() => {
  }, [data, mapMode, addMarkersToMap, addHeatmapToMap, clearMarkers, clearHeatmap]);
  
 
-  //Update user location marker
   useEffect(() => {
     if (isInitializedRef.current && leafletMapRef.current && userLocation) {
       setTimeout(() => {
@@ -758,7 +692,6 @@ const addHeatmapToMap = useCallback(() => {
     }
   }, [userLocation, addUserLocationMarker, mapMode]);
 
-  // Render: Map container with loading state
   return (
   <div
     ref={mapRef}
