@@ -1,83 +1,17 @@
 "use client";
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { MapPin, Layers, AlertTriangle, TrendingUp, ExternalLink } from 'lucide-react';
+import { MapPin, Layers, AlertTriangle, ExternalLink } from 'lucide-react';
 import MapComponent from './Map';
+import StatisticsPanel from './StatisticsPanel';
 import { useFireRiskData } from '../lib/api';
 import { FireRiskData } from '../types';
-import Image from 'next/image';
 import { CANADIAN_STATIONS } from '../lib/constants/stations';
 import { getRiskColor, getRiskLabel } from '../lib/utils/colours';
 import { calculateDistance } from '../lib/utils/geo';
 import { theme } from '../lib/constants/theme';
 import { logger } from '../lib/utils/logger';
 
-
-const StatisticsPanel: React.FC<{ data: FireRiskData[]; modelInfo: any; shouldShowSkeleton: boolean; userLocation: { lat: number; lon: number; city?: string } | null }> = ({ data, modelInfo, shouldShowSkeleton, userLocation }) => {
-  const stats = useMemo(() => {
-    if (!data || data.length === 0) return { extreme: 0, veryHigh: 0, high: 0, moderate: 0, low: 0, veryLow: 0 }; 
-    
-    // Updated thresholds for FWI values (not percentages)
-    return {
-      extreme: data.filter(d => d.riskLevel >= 30).length,
-      veryHigh: data.filter(d => d.riskLevel >= 18 && d.riskLevel < 30).length,
-      high: data.filter(d => d.riskLevel >= 8 && d.riskLevel < 18).length,
-      moderate: data.filter(d => d.riskLevel >= 4 && d.riskLevel < 8).length,
-      low: data.filter(d => d.riskLevel >= 2 && d.riskLevel < 4).length,
-      veryLow: data.filter(d => d.riskLevel < 2).length
-    };
-  }, [data]);
-
-  return (
-    <div className="rounded-lg shadow-lg backdrop-blur-sm p-6 mb-6" style={{ backgroundColor: 'rgba(255, 248, 230, 0.85)', border: '1px solid rgba(218, 165, 32, 0.3)' }}>
-      <div className="flex items-center mb-4">
-        <TrendingUp className="w-5 h-5 mr-2 text-orange-700" />
-        <h3 className="text-lg font-semibold text-amber-900">FWI Distribution</h3>
-      </div>
-      <div className="grid grid-cols-2 gap-4 mb-4">
-        <div className="text-center p-3 bg-purple-50 rounded-lg border border-purple-200 shadow-sm">
-          <div className="text-2xl font-bold text-purple-600">{shouldShowSkeleton ? '...' : stats.extreme}</div>
-          <div className="text-sm text-purple-800">Extreme</div>
-          <div className="text-xs text-purple-600 mt-1">FWI 30+</div>
-        </div>
-        <div className="text-center p-3 bg-red-50 rounded-lg border border-red-200 shadow-sm">
-          <div className="text-2xl font-bold text-red-600">{shouldShowSkeleton ? '...' : stats.veryHigh}</div>
-          <div className="text-sm text-red-800">Very High</div>
-          <div className="text-xs text-red-600 mt-1">FWI 18-30</div>
-        </div>
-        <div className="text-center p-3 bg-orange-50 rounded-lg border border-orange-200 shadow-sm">
-          <div className="text-2xl font-bold text-orange-600">{shouldShowSkeleton ? '...' : stats.high}</div>
-          <div className="text-sm text-orange-800">High</div>
-          <div className="text-xs text-orange-600 mt-1">FWI 8-18</div>
-        </div>
-        <div className="text-center p-3 bg-yellow-50 rounded-lg border border-yellow-200 shadow-sm">
-          <div className="text-2xl font-bold text-yellow-700">{shouldShowSkeleton ? '...' : stats.moderate}</div>
-          <div className="text-sm text-yellow-800">Moderate</div>
-          <div className="text-xs text-yellow-700 mt-1">FWI 4-8</div>
-        </div>
-        <div className="text-center p-3 bg-green-50 rounded-lg border border-green-200 shadow-sm">
-          <div className="text-2xl font-bold text-green-600">{shouldShowSkeleton ? '...' : stats.low + stats.veryLow}</div>
-          <div className="text-sm text-green-800">Low</div>
-          <div className="text-xs text-green-600 mt-1">FWI 0-4</div>
-        </div>
-      </div>
-      {modelInfo && (
-        <div className="border-t border-amber-200 pt-4 space-y-2">
-          <div className="flex justify-between text-sm">
-            <span className="text-amber-800">Grid Locations:</span>
-            <span className="font-medium text-amber-900">{data?.length || 0}</span>
-          </div>
-          <div className="flex justify-between text-sm">
-            <span className="text-amber-800">Location Tracking:</span>
-            <span className={`font-medium ${userLocation ? 'text-green-600' : 'text-gray-500'}`}>
-              {userLocation ? 'On' : 'Off'}
-            </span>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
 
 const Legend: React.FC = () => {
   const dangerClasses = [
@@ -560,7 +494,7 @@ const updateStatus = getUpdateStatus();
                       </span>
                       {!loading && lastUpdated && (
                         <span className="text-xs text-amber-600 italic">
-                          Updates hourly (~:05)
+                          Updates daily at noon
                         </span>
                       )}
                     </div>
@@ -804,7 +738,7 @@ const updateStatus = getUpdateStatus();
                   </div>
                   <div className="flex justify-between">
                     <span className="text-amber-800">Update Schedule:</span>
-                    <span className="font-medium text-amber-900">Every hour</span>
+                    <span className="font-medium text-amber-900">Daily at noon</span>
                   </div>
                 </div>
                 <div className="text-xs pt-3 border-t border-amber-200 bg-blue-50 p-3 rounded">
