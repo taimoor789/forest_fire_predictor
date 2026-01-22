@@ -452,7 +452,7 @@ const updateStatus = getUpdateStatus();
               <p className="text-sm sm:text-base md:text-lg font-medium" 
                 
                 style={theme.styles.subtitle}>
-                Daily fire danger monitoring using the Canadian Fire Weather Index System
+                Daily fire danger monitoring using the Canadian Fire Weather Index
               </p>
             </div>
             {/* Right Icon */}
