@@ -494,7 +494,7 @@ const updateStatus = getUpdateStatus();
                       </span>
                       {!loading && lastUpdated && (
                         <span className="text-xs text-amber-600 italic">
-                          Updates daily at noon
+                          FWI: Daily at noon • Weather: Hourly
                         </span>
                       )}
                     </div>

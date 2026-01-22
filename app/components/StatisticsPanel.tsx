@@ -30,15 +30,6 @@ const StatisticsPanel: React.FC<StatisticsPanelProps> = ({
     };
   }, [data]);
 
-  const dangerClasses = [
-    { name: 'Extreme', count: stats.extreme, color: '#9C27B0', range: '30+' },
-    { name: 'Very High', count: stats.veryHigh, color: '#F44336', range: '18-30' },
-    { name: 'High', count: stats.high, color: '#FF9800', range: '8-18' },
-    { name: 'Moderate', count: stats.moderate, color: '#FFEB3B', range: '4-8' },
-    { name: 'Low', count: stats.low, color: '#8BC34A', range: '2-4' },
-    { name: 'Very Low', count: stats.veryLow, color: '#4CAF50', range: '0-2' }
-  ];
-
   return (
     <div className="rounded-lg shadow-lg backdrop-blur-sm p-6 mb-6" style={{ backgroundColor: 'rgba(255, 248, 230, 0.85)', border: '1px solid rgba(218, 165, 32, 0.3)' }}>
       <div className="flex items-center mb-4">
@@ -46,41 +37,48 @@ const StatisticsPanel: React.FC<StatisticsPanelProps> = ({
         <h3 className="text-lg font-semibold text-amber-900">FWI Distribution</h3>
       </div>
       
-      {/* Circular Grid Layout - 2x3 */}
-      <div className="grid grid-cols-2 gap-3 mb-4">
-        {dangerClasses.map((danger, index) => (
-          <div 
-            key={index}
-            className="relative rounded-xl shadow-md p-4 text-center transition-all hover:shadow-lg"
-            style={{ 
-              backgroundColor: `${danger.color}15`,
-              border: `2px solid ${danger.color}40`
-            }}
-          >
-            {/* Count Circle */}
-            <div 
-              className="mx-auto w-16 h-16 rounded-full flex items-center justify-center mb-2 shadow-sm"
-              style={{ 
-                backgroundColor: danger.color,
-                color: 'white'
-              }}
-            >
-              <span className="text-xl font-bold">
-                {shouldShowSkeleton ? '...' : danger.count}
-              </span>
-            </div>
-            
-            {/* Label */}
-            <div className="text-sm font-semibold mb-1" style={{ color: danger.color }}>
-              {danger.name}
-            </div>
-            
-            {/* FWI Range */}
-            <div className="text-xs font-medium" style={{ color: danger.color }}>
-              FWI {danger.range}
-            </div>
-          </div>
-        ))}
+      <div className="grid grid-cols-2 gap-4 mb-4">
+        {/* Extreme */}
+        <div className="text-center p-3 bg-purple-50 rounded-lg border border-purple-200 shadow-sm">
+          <div className="text-2xl font-bold text-purple-600">{shouldShowSkeleton ? '...' : stats.extreme}</div>
+          <div className="text-sm text-purple-800">Extreme</div>
+          <div className="text-xs text-purple-600 mt-1">FWI 30+</div>
+        </div>
+        
+        {/* Very High */}
+        <div className="text-center p-3 bg-red-50 rounded-lg border border-red-200 shadow-sm">
+          <div className="text-2xl font-bold text-red-600">{shouldShowSkeleton ? '...' : stats.veryHigh}</div>
+          <div className="text-sm text-red-800">Very High</div>
+          <div className="text-xs text-red-600 mt-1">FWI 18-30</div>
+        </div>
+        
+        {/* High */}
+        <div className="text-center p-3 bg-orange-50 rounded-lg border border-orange-200 shadow-sm">
+          <div className="text-2xl font-bold text-orange-600">{shouldShowSkeleton ? '...' : stats.high}</div>
+          <div className="text-sm text-orange-800">High</div>
+          <div className="text-xs text-orange-600 mt-1">FWI 8-18</div>
+        </div>
+        
+        {/* Moderate */}
+        <div className="text-center p-3 bg-yellow-50 rounded-lg border border-yellow-200 shadow-sm">
+          <div className="text-2xl font-bold text-yellow-700">{shouldShowSkeleton ? '...' : stats.moderate}</div>
+          <div className="text-sm text-yellow-800">Moderate</div>
+          <div className="text-xs text-yellow-700 mt-1">FWI 4-8</div>
+        </div>
+        
+        {/* Low */}
+        <div className="text-center p-3 bg-green-50 rounded-lg border border-green-200 shadow-sm">
+          <div className="text-2xl font-bold text-green-600">{shouldShowSkeleton ? '...' : stats.low}</div>
+          <div className="text-sm text-green-800">Low</div>
+          <div className="text-xs text-green-600 mt-1">FWI 2-4</div>
+        </div>
+        
+        {/* Very Low */}
+        <div className="text-center p-3 bg-green-50 rounded-lg border border-green-200 shadow-sm">
+          <div className="text-2xl font-bold text-green-600">{shouldShowSkeleton ? '...' : stats.veryLow}</div>
+          <div className="text-sm text-green-800">Very Low</div>
+          <div className="text-xs text-green-600 mt-1">FWI 0-2</div>
+        </div>
       </div>
 
       {/* Summary Info */}
