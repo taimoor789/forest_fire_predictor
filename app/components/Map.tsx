@@ -1,106 +1,76 @@
-"use client"; //Ensures leaflet map only renders on the client 
+"use client"; // Leaflet must only ever render on the client
 
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { FireRiskData } from '../types';
+import { FwiTier } from '../lib/fwi/tiers';
+import type { MapViewMode } from './LeafletMap';
 
-//Dynamic import - Load LeafletMap only on client-side
-const LeafletMap = dynamic(
-  () => import('./LeafletMap'),
-  {
-    ssr: false, //Don't render on server
-    loading: () => (
-      // Loading placeholder while LeafletMap code is being downloaded
-      <div className="h-full flex items-center justify-center bg-gray-100 rounded">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
-          <p className="text-gray-600">Loading map component...</p>
-        </div>
-      </div>
-    )
-  }
+const PlateLoading: React.FC<{ label: string }> = ({ label }) => (
+  <div className="flex h-full items-center justify-center" style={{ background: 'var(--paper)' }}>
+    <p className="font-display text-xs tracking-[0.14em] uppercase" style={{ color: 'var(--ink-muted)' }}>
+      {label}
+    </p>
+  </div>
 );
 
+const LeafletMap = dynamic(() => import('./LeafletMap'), {
+  ssr: false,
+  loading: () => <PlateLoading label="Loading map engine…" />,
+});
+
 interface MapProps {
-  data?: FireRiskData[];
+  data: FireRiskData[];
+  tiers: FwiTier[];
   height?: string;
   className?: string;
-  onLocationClick?: (location: FireRiskData) => void;
-  mapMode?: 'markers' | 'heatmap';
-  onStationCountUpdate?: (count: number) => void;
+  mode: MapViewMode;
+  activeTierIds: Set<string> | null;
+  selectedCellId?: string | null;
+  onCellSelect?: (cell: FireRiskData | null) => void;
   userLocation?: { lat: number; lon: number; city?: string } | null;
 }
 
 const Map: React.FC<MapProps> = ({
-  data = [],
+  data,
+  tiers,
   height = '700px',
   className = '',
-  onLocationClick,
-  mapMode = 'markers',
-  onStationCountUpdate,
-  userLocation
+  mode,
+  activeTierIds,
+  selectedCellId,
+  onCellSelect,
+  userLocation,
 }) => {
-  // Track whether we're in browser or server
-  // Prevents hydration mismatches between server and client rendering
   const [isClient, setIsClient] = useState(false);
+  useEffect(() => setIsClient(true), []);
 
-  useEffect(() => {
-    setIsClient(true);
-  }, []);
+  const validData = useMemo(
+    () =>
+      (data || [])
+        .map((d) => ({ ...d, lat: Number(d.lat), lon: Number(d.lon) }))
+        .filter((d) => !isNaN(d.lat) && !isNaN(d.lon) && d.lat >= -90 && d.lat <= 90 && d.lon >= -180 && d.lon <= 180),
+    [data]
+  );
 
-  // useMemo prevents recalculation on every render
-  const memoizedData = useMemo(() => {
-    if (data && data.length > 0) {
-      return data.map(location => ({
-        ...location,
-        // Ensure coordinates are numbers
-        lat: typeof location.lat === 'number' ? location.lat : parseFloat(location.lat as string),
-        lon: typeof location.lon === 'number' ? location.lon : parseFloat(location.lon as string)
-      })).filter(location => 
-        // Remove invalid coordinates
-        !isNaN(location.lat) &&
-        !isNaN(location.lon) &&
-        location.lat >= -90 && location.lat <= 90 &&
-        location.lon >= -180 && location.lon <= 180
-      );
-    }
-    return [];
-  }, [data]); // Only recalculate when data array changes
-
-  // useCallback prevents function recreation on every render
-  const handleStationCountUpdate = useCallback((count: number) => {
-    if (onStationCountUpdate) {
-      onStationCountUpdate(count);
-    }
-  }, [onStationCountUpdate]);
-
-  // SSR guard - show loading state until client-side
   if (!isClient) {
     return (
-      <div 
-        className={`flex items-center justify-center bg-gray-100 rounded-lg ${className}`}
-        style={{ height, minHeight: '400px' }}
-      >
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-red-600 mx-auto mb-2"></div>
-          <p className="text-gray-600">Initializing Map...</p>
-        </div>
+      <div className={className} style={{ height, minHeight: '400px' }}>
+        <PlateLoading label="Initializing map…" />
       </div>
     );
   }
 
-  //Render leafletMap only on client side
   return (
-    <div 
-      className={`relative rounded-lg overflow-hidden ${className}`}
-      style={{ height, minHeight: '400px' }}
-    >
-      <LeafletMap 
-        data={memoizedData}
+    <div className={`relative overflow-hidden ${className}`} style={{ height, minHeight: '400px' }}>
+      <LeafletMap
+        data={validData}
+        tiers={tiers}
         height={height}
-        onLocationClick={onLocationClick}
-        mapMode={mapMode}
-        onStationCountUpdate={handleStationCountUpdate}
+        mode={mode}
+        activeTierIds={activeTierIds}
+        selectedCellId={selectedCellId}
+        onCellSelect={onCellSelect}
         userLocation={userLocation}
       />
     </div>

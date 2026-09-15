@@ -1,99 +1,125 @@
-import React, { useMemo } from 'react';
-import { TrendingUp } from 'lucide-react';
+"use client";
+
+import React, { useMemo, useState } from 'react';
+import { ChevronDown } from 'lucide-react';
 import { FireRiskData } from '../types';
+import { FwiTier, bucketByTier, formatTierRange } from '../lib/fwi/tiers';
 
 interface StatisticsPanelProps {
   data: FireRiskData[];
-  modelInfo: any;
+  tiers: FwiTier[];
+  excludedTierIds: Set<string>;
+  onToggleTier: (tierId: string) => void;
   shouldShowSkeleton: boolean;
-  userLocation: { lat: number; lon: number; city?: string } | null;
 }
 
-const StatisticsPanel: React.FC<StatisticsPanelProps> = ({ 
-  data, 
-  modelInfo, 
-  shouldShowSkeleton, 
-  userLocation 
-}) => {
-  const stats = useMemo(() => {
-    if (!data || data.length === 0) {
-      return { extreme: 0, veryHigh: 0, high: 0, moderate: 0, low: 0, veryLow: 0 };
-    }
-    
-    return {
-      extreme: data.filter(d => d.riskLevel >= 30).length,
-      veryHigh: data.filter(d => d.riskLevel >= 18 && d.riskLevel < 30).length,
-      high: data.filter(d => d.riskLevel >= 8 && d.riskLevel < 18).length,
-      moderate: data.filter(d => d.riskLevel >= 4 && d.riskLevel < 8).length,
-      low: data.filter(d => d.riskLevel >= 2 && d.riskLevel < 4).length,
-      veryLow: data.filter(d => d.riskLevel < 2).length
-    };
-  }, [data]);
+/**
+ * The tier key, the day's distribution, and the tier filter, in one place —
+ * clicking a swatch isolates that tier on the map. The six tiers are never
+ * hardcoded here; they come from the registry (app/lib/fwi/tiers.ts), which
+ * is itself seeded from /api/danger-classes.
+ *
+ * Collapsed by default to a single compact swatch row: the full panel sits
+ * over the map, and a 6-row breakdown was covering a good stretch of western
+ * Canada. Expand for counts, ranges, and the per-tier distribution bars.
+ *
+ * Content only — no outer frame. It's meant to be embedded directly under
+ * the title block inside one consolidated panel, not to stand alone.
+ */
+const StatisticsPanel: React.FC<StatisticsPanelProps> = ({ data, tiers, excludedTierIds, onToggleTier, shouldShowSkeleton }) => {
+  const [expanded, setExpanded] = useState(false);
+  const buckets = useMemo(() => bucketByTier(data, (d) => d.riskLevel, tiers), [data, tiers]);
+  const total = data.length;
+  const anyExcluded = excludedTierIds.size > 0;
+  const orderedTiers = useMemo(() => [...tiers].reverse(), [tiers]);
 
   return (
-    <div className="rounded-lg shadow-lg backdrop-blur-sm p-6 mb-6" style={{ backgroundColor: 'rgba(255, 248, 230, 0.85)', border: '1px solid rgba(218, 165, 32, 0.3)' }}>
-      <div className="flex items-center mb-4">
-        <TrendingUp className="w-5 h-5 mr-2 text-orange-700" />
-        <h3 className="text-lg font-semibold text-amber-900">FWI Distribution</h3>
-      </div>
-      
-      <div className="grid grid-cols-2 gap-4 mb-4">
-        {/* Extreme */}
-        <div className="text-center p-3 bg-purple-50 rounded-lg border border-purple-200 shadow-sm">
-          <div className="text-2xl font-bold text-purple-600">{shouldShowSkeleton ? '...' : stats.extreme}</div>
-          <div className="text-sm text-purple-800">Extreme</div>
-          <div className="text-xs text-purple-600 mt-1">FWI 30+</div>
-        </div>
-        
-        {/* Very High */}
-        <div className="text-center p-3 bg-red-50 rounded-lg border border-red-200 shadow-sm">
-          <div className="text-2xl font-bold text-red-600">{shouldShowSkeleton ? '...' : stats.veryHigh}</div>
-          <div className="text-sm text-red-800">Very High</div>
-          <div className="text-xs text-red-600 mt-1">FWI 18-30</div>
-        </div>
-        
-        {/* High */}
-        <div className="text-center p-3 bg-orange-50 rounded-lg border border-orange-200 shadow-sm">
-          <div className="text-2xl font-bold text-orange-600">{shouldShowSkeleton ? '...' : stats.high}</div>
-          <div className="text-sm text-orange-800">High</div>
-          <div className="text-xs text-orange-600 mt-1">FWI 8-18</div>
-        </div>
-        
-        {/* Moderate */}
-        <div className="text-center p-3 bg-yellow-50 rounded-lg border border-yellow-200 shadow-sm">
-          <div className="text-2xl font-bold text-yellow-700">{shouldShowSkeleton ? '...' : stats.moderate}</div>
-          <div className="text-sm text-yellow-800">Moderate</div>
-          <div className="text-xs text-yellow-700 mt-1">FWI 4-8</div>
-        </div>
-        
-        {/* Low */}
-        <div className="text-center p-3 bg-green-50 rounded-lg border border-green-200 shadow-sm">
-          <div className="text-2xl font-bold text-green-600">{shouldShowSkeleton ? '...' : stats.low}</div>
-          <div className="text-sm text-green-800">Low</div>
-          <div className="text-xs text-green-600 mt-1">FWI 2-4</div>
-        </div>
-        
-        {/* Very Low */}
-        <div className="text-center p-3 bg-green-50 rounded-lg border border-green-200 shadow-sm">
-          <div className="text-2xl font-bold text-green-600">{shouldShowSkeleton ? '...' : stats.veryLow}</div>
-          <div className="text-sm text-green-800">Very Low</div>
-          <div className="text-xs text-green-600 mt-1">FWI 0-2</div>
-        </div>
+    <div>
+      <div className="flex items-center justify-between px-5 pt-4 pb-2" style={{ borderTop: '1px solid var(--hairline)' }}>
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="flex items-center gap-2"
+          aria-expanded={expanded}
+        >
+          <h2 className="font-display text-[11px] font-semibold tracking-[0.14em] uppercase" style={{ color: 'var(--ink)' }}>
+            Fire Danger Class
+          </h2>
+          <ChevronDown className="h-3.5 w-3.5 transition-transform" style={{ color: 'var(--accent)', transform: expanded ? 'rotate(180deg)' : undefined }} />
+        </button>
+        {anyExcluded && expanded && (
+          <button
+            type="button"
+            onClick={() => tiers.forEach((t) => excludedTierIds.has(t.id) && onToggleTier(t.id))}
+            className="font-display text-[10px] font-semibold tracking-[0.08em] uppercase underline underline-offset-2"
+            style={{ color: 'var(--accent)' }}
+          >
+            Show all
+          </button>
+        )}
       </div>
 
-      {/* Summary Info */}
-      {modelInfo && (
-        <div className="border-t border-amber-200 pt-4 space-y-2">
-          <div className="flex justify-between text-sm">
-            <span className="text-amber-800">Grid Locations:</span>
-            <span className="font-medium text-amber-900">{data?.length || 0}</span>
+      {expanded ? (
+        <>
+          <div role="list" className="divide-y" style={{ borderColor: 'var(--hairline)' }}>
+            {orderedTiers.map((tier) => {
+              const count = buckets.get(tier.id)?.length ?? 0;
+              const pct = total > 0 ? (count / total) * 100 : 0;
+              const excluded = excludedTierIds.has(tier.id);
+              return (
+                <button
+                  key={tier.id}
+                  type="button"
+                  role="listitem"
+                  aria-pressed={!excluded}
+                  onClick={() => onToggleTier(tier.id)}
+                  className="group flex w-full items-center gap-3 px-5 py-2.5 text-left transition-colors hover:[background:var(--accent-soft)]"
+                  style={{ borderColor: 'var(--hairline)', opacity: excluded ? 0.4 : 1 }}
+                >
+                  <span aria-hidden="true" className="h-3.5 w-3.5 flex-shrink-0" style={{ background: tier.color, border: '1px solid rgba(21,23,15,0.25)' }} />
+                  <span className="font-display text-[14px] flex-1" style={{ color: 'var(--ink)' }}>
+                    {tier.name}
+                  </span>
+                  <span className="font-mono tabular text-[12px]" style={{ color: 'var(--ink-muted)' }}>
+                    {shouldShowSkeleton ? '…' : count.toLocaleString()}
+                  </span>
+                  <span className="font-mono tabular text-[10px] w-16 text-right" style={{ color: 'var(--ink-muted)' }}>
+                    {formatTierRange(tier)}
+                  </span>
+                  <span className="hidden sm:block h-1 w-10 flex-shrink-0" style={{ background: 'var(--hairline)' }} aria-hidden="true">
+                    <span className="block h-full" style={{ width: `${pct}%`, background: excluded ? 'var(--ink-faint)' : tier.color }} />
+                  </span>
+                </button>
+              );
+            })}
           </div>
-          <div className="flex justify-between text-sm">
-            <span className="text-amber-800">Location Tracking:</span>
-            <span className={`font-medium ${userLocation ? 'text-green-600' : 'text-gray-500'}`}>
-              {userLocation ? 'On' : 'Off'}
-            </span>
-          </div>
+          <p className="px-5 py-3 text-[11px] leading-relaxed" style={{ color: 'var(--ink-muted)', borderTop: '1px solid var(--hairline)' }}>
+            FWI measures fire behaviour potential: how it would spread if a fire started. Tap a class to isolate it on the map.
+          </p>
+        </>
+      ) : (
+        <div className="flex items-stretch gap-1 px-5 pb-4">
+          {orderedTiers.map((tier) => {
+            const count = buckets.get(tier.id)?.length ?? 0;
+            const excluded = excludedTierIds.has(tier.id);
+            return (
+              <button
+                key={tier.id}
+                type="button"
+                aria-pressed={!excluded}
+                aria-label={`${tier.name}: ${count.toLocaleString()} cells`}
+                title={`${tier.name}: ${count.toLocaleString()}`}
+                onClick={() => onToggleTier(tier.id)}
+                className="flex flex-1 flex-col items-center gap-1 py-1 transition-opacity"
+                style={{ opacity: excluded ? 0.35 : 1 }}
+              >
+                <span aria-hidden="true" className="h-3.5 w-full" style={{ background: tier.color, border: '1px solid rgba(21,23,15,0.25)' }} />
+                <span className="font-mono tabular text-[9px]" style={{ color: 'var(--ink-muted)' }}>
+                  {shouldShowSkeleton ? '…' : count.toLocaleString()}
+                </span>
+              </button>
+            );
+          })}
         </div>
       )}
     </div>

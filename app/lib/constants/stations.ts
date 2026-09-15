@@ -1,3 +1,5 @@
+import { calculateDistance } from '../utils/geo';
+
 export interface Station {
   name: string;
   lat: number;
@@ -45,3 +47,23 @@ export const CANADIAN_STATIONS: Station[] = [
   { name: "Rankin Inlet", lat: 62.8090, lon: -92.0853, province: "NU" },
   { name: "Cambridge Bay", lat: 69.1167, lon: -105.0667, province: "NU" }
 ] as const;
+
+/**
+ * Grid cells carry an internal id ("Grid_1832"), not a real place name — the
+ * nearest of the 38 named stations stands in as a recognizable "city" label
+ * for a cell. Cheap and synchronous (38-entry linear scan), and consistent
+ * with how the app already treats these stations as the public-facing named
+ * anchors (the Stations view, "Nearest station" distance readouts).
+ */
+export function nearestStation(lat: number, lon: number): Station & { distanceKm: number } {
+  let best = CANADIAN_STATIONS[0];
+  let bestDistance = calculateDistance(lat, lon, best.lat, best.lon);
+  for (const station of CANADIAN_STATIONS) {
+    const d = calculateDistance(lat, lon, station.lat, station.lon);
+    if (d < bestDistance) {
+      best = station;
+      bestDistance = d;
+    }
+  }
+  return { ...best, distanceKm: bestDistance };
+}

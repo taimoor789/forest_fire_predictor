@@ -1,770 +1,688 @@
 "use client";
 
-import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { MapPin, Layers, AlertTriangle, ExternalLink } from 'lucide-react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { MapPin, Layers, AlertTriangle, X, ChevronDown, ArrowDown } from 'lucide-react';
 import MapComponent from './Map';
 import StatisticsPanel from './StatisticsPanel';
-import { useFireRiskData } from '../lib/api';
+import { useFireRiskData, API_BASE_URL } from '../lib/api';
 import { FireRiskData } from '../types';
-import { CANADIAN_STATIONS } from '../lib/constants/stations';
-import { getRiskColor, getRiskLabel } from '../lib/utils/colours';
+import { useFwiTiers, tierForFwi, formatTierRange, bucketByTier } from '../lib/fwi/tiers';
 import { calculateDistance } from '../lib/utils/geo';
-import { theme } from '../lib/constants/theme';
+import { CANADIAN_STATIONS, nearestStation } from '../lib/constants/stations';
 import { logger } from '../lib/utils/logger';
+import { useInView } from '../lib/hooks/useInView';
+import type { MapViewMode } from './LeafletMap';
 
+const LOCATION_STORAGE_KEY = 'userLocation';
+const LOCATION_TIMESTAMP_KEY = 'userLocationTimestamp';
 
-const Legend: React.FC = () => {
-  const dangerClasses = [
-    { label: 'Extreme', color: '#9C27B0', range: 'FWI 30+' },
-    { label: 'Very High', color: '#F44336', range: 'FWI 18-30' },
-    { label: 'High', color: '#FF9800', range: 'FWI 8-18' },
-    { label: 'Moderate', color: '#FFEB3B', range: 'FWI 4-8' },
-    { label: 'Low', color: '#8BC34A', range: 'FWI 2-4' },
-    { label: 'Very Low', color: '#4CAF50', range: 'FWI 0-2' }
-  ];
-  
+type UserLocation = { lat: number; lon: number; city?: string };
+
+/**
+ * A grid cell's `location` field is an internal id ("Grid_1832"), not a real
+ * place name; station aggregates (Stations view) carry a real one already,
+ * distinguished by the "station_" id prefix createStationAggregates uses.
+ *
+ * City and province are always read from the SAME record (the station
+ * aggregate's own fields, or one resolved nearestStation's own fields) and
+ * never mixed with the cell's own `province` field — a cell near the BC/AB
+ * border can have Kelowna (BC) as its nearest named station, and pairing
+ * that city with the cell's own province produced a nonsensical "Kelowna, AB".
+ */
+function displayLocationFor(cell: FireRiskData): { city: string; province: string } {
+  if (cell.id.startsWith('station_')) return { city: cell.location, province: cell.province };
+  const station = nearestStation(cell.lat, cell.lon);
+  return { city: station.name, province: station.province };
+}
+
+function prefersReducedMotion(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+// ---------------------------------------------------------------------------
+// Small presentational pieces, styled to the plate world: flat paper
+// surfaces, hairline borders, no shadows. The six tier colors classify data;
+// --accent is the one signature color for the UI's own brand and
+// interactivity (buttons, links, active states) — see globals.css.
+// ---------------------------------------------------------------------------
+
+const StatusDot: React.FC<{ status: 'loading' | 'error' | 'ok' }> = ({ status }) => (
+  <span
+    aria-hidden="true"
+    className={`inline-block h-2 w-2 rounded-full ${status === 'loading' ? 'animate-pulse motion-reduce:animate-none' : ''}`}
+    style={{
+      background: status === 'ok' ? 'var(--accent)' : 'transparent',
+      border: status === 'ok' ? 'none' : '1.5px solid var(--ink-muted)',
+    }}
+  />
+);
+
+const ModeToggle: React.FC<{ mode: MapViewMode; onChange: (m: MapViewMode) => void; disabled: boolean }> = ({
+  mode,
+  onChange,
+  disabled,
+}) => (
+  <div className="flex divide-x" style={{ border: '1px solid var(--ink)', borderColor: 'var(--ink)' }}>
+    {(['grid', 'stations'] as const).map((m) => {
+      const active = mode === m;
+      return (
+        <button
+          key={m}
+          type="button"
+          aria-pressed={active}
+          disabled={disabled}
+          onClick={() => onChange(m)}
+          className="flex flex-1 items-center justify-center gap-1.5 px-3 py-2 font-display text-[11px] font-bold tracking-[0.08em] uppercase transition-colors active:scale-[0.97] disabled:opacity-50"
+          style={{
+            background: active ? 'var(--accent)' : 'var(--paper-raised)',
+            color: active ? 'var(--accent-on)' : 'var(--ink)',
+            borderColor: 'var(--ink)',
+          }}
+          onMouseEnter={(e) => {
+            if (!active) e.currentTarget.style.background = 'var(--accent-soft)';
+          }}
+          onMouseLeave={(e) => {
+            if (!active) e.currentTarget.style.background = 'var(--paper-raised)';
+          }}
+        >
+          {m === 'grid' ? <Layers className="h-3.5 w-3.5" /> : <MapPin className="h-3.5 w-3.5" />}
+          {m === 'grid' ? 'Grid' : 'Stations'}
+        </button>
+      );
+    })}
+  </div>
+);
+
+const Panel: React.FC<{ children: React.ReactNode; className?: string }> = ({ children, className = '' }) => (
+  <div className={className} style={{ background: 'var(--paper-raised)', border: '1px solid var(--hairline)' }}>
+    {children}
+  </div>
+);
+
+/** A section heading with the one recurring brand motif: a small accent tick
+ * beside the type, never a text label riding above it. */
+const SectionHeading: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <h2 className="flex items-center gap-3 font-display text-2xl font-bold uppercase tracking-[0.02em]" style={{ color: 'var(--ink)' }}>
+    <span aria-hidden="true" className="h-6 w-1.5 flex-shrink-0" style={{ background: 'var(--accent)' }} />
+    {children}
+  </h2>
+);
+
+/** Counts up from 0 once the element scrolls into view; snaps instantly under reduced motion. */
+const CountUp: React.FC<{ value: number; decimals?: number; suffix?: string }> = ({ value, decimals = 0, suffix = '' }) => {
+  const { ref, inView } = useInView<HTMLSpanElement>();
+  const [display, setDisplay] = useState(0);
+
+  useEffect(() => {
+    if (!inView) return;
+    if (prefersReducedMotion()) {
+      setDisplay(value);
+      return;
+    }
+    let raf: number;
+    const start = performance.now();
+    const duration = 900;
+    const tick = (t: number) => {
+      const p = Math.min((t - start) / duration, 1);
+      const eased = 1 - Math.pow(1 - p, 3);
+      setDisplay(value * eased);
+      if (p < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [inView, value]);
+
   return (
-    <div className="rounded-lg shadow-lg backdrop-blur-sm p-4 mb-6" style={{ backgroundColor: 'rgba(255, 248, 230, 0.85)', border: '1px solid rgba(218, 165, 32, 0.3)' }}>
-      <h3 className="text-sm font-semibold text-amber-900 mb-3">Fire Danger Class</h3>
-      <div className="space-y-2">
-        {dangerClasses.map((level, index) => (
-        <div key={index} className="flex items-center text-sm" role="listitem">
-          <div 
-            className="w-4 h-4 rounded mr-3 shadow-sm" 
-            style={{ backgroundColor: level.color }}
-            aria-label={`Danger class color: ${level.color}`}
-          />
-          <span className="flex-1 text-amber-900">{level.label}</span>
-          <span className="text-amber-700 text-xs">{level.range}</span>
-        </div>
-      ))}
-      </div>
-      <div className="mt-3 pt-3 border-t border-amber-200 text-xs text-amber-800">
-        <strong>Note:</strong> FWI measures fire behavior potential (spread rate, intensity) if ignition occurs
-      </div>
+    <span ref={ref} className="count-up">
+      {display.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}
+      {suffix}
+    </span>
+  );
+};
+
+/** Reveals its children once they scroll into view (see globals.css [data-reveal]). */
+const Reveal: React.FC<{ children: React.ReactNode; className?: string }> = ({ children, className = '' }) => {
+  const { ref, inView } = useInView<HTMLDivElement>();
+  return (
+    <div ref={ref} data-reveal={inView ? 'in' : undefined} className={className}>
+      {children}
     </div>
   );
 };
 
-const HeatmapLegend: React.FC = () => (
-  <div className="rounded-lg shadow-lg backdrop-blur-sm p-4 mb-6" style={{ backgroundColor: 'rgba(255, 248, 230, 0.85)', border: '1px solid rgba(218, 165, 32, 0.3)' }}>
-    <h3 className="text-sm font-semibold text-amber-900 mb-3">Heatmap Intensity</h3>
-    <div className="mb-3">
-      <div className="h-4 rounded shadow-sm" style={{ background: 'linear-gradient(to right, #4CAF50 0%, #8BC34A 17%, #FFEB3B 33%, #FF9800 50%, #F44336 67%, #9C27B0 100%)' }} />
-      <div className="flex justify-between mt-1 text-xs text-amber-800">
-        <span>Low FWI</span>
-        <span>Moderate FWI</span>
-        <span>High FWI</span>
+const CellRow: React.FC<{ cell: FireRiskData; onSelect: () => void; tiers: ReturnType<typeof useFwiTiers> }> = ({ cell, onSelect, tiers }) => {
+  const tier = tierForFwi(cell.riskLevel, tiers);
+  const location = displayLocationFor(cell);
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className="flex w-full items-center gap-4 px-5 py-3 text-left transition-colors hover:[background:var(--accent-soft)]"
+      style={{ borderTop: '1px solid var(--hairline)' }}
+    >
+      <span aria-hidden="true" className="h-3 w-3 flex-shrink-0" style={{ background: tier.color, border: '1px solid rgba(21,23,15,0.25)' }} />
+      <span className="flex-1 font-display text-[14px]" style={{ color: 'var(--ink)' }}>
+        {location.city}, {location.province} · {Math.abs(cell.lat).toFixed(1)}°N, {Math.abs(cell.lon).toFixed(1)}°W
+      </span>
+      <span className="font-display text-[11px]" style={{ color: 'var(--ink-muted)' }}>
+        {tier.name}
+      </span>
+      <span className="font-mono tabular text-[14px] font-semibold" style={{ color: 'var(--ink)' }}>
+        {cell.riskLevel.toFixed(1)}
+      </span>
+    </button>
+  );
+};
+
+// ---------------------------------------------------------------------------
+
+const FireRiskDashboard: React.FC = () => {
+  const { data, loading, error, lastUpdated, isStaleCache } = useFireRiskData();
+  const tiers = useFwiTiers(API_BASE_URL);
+  const shouldShowSkeleton = loading && data.length === 0;
+
+  const [mode, setMode] = useState<MapViewMode>('grid');
+  const [isSwitchingMode, setIsSwitchingMode] = useState(false);
+  const [excludedTierIds, setExcludedTierIds] = useState<Set<string>>(new Set());
+  const [selectedCell, setSelectedCell] = useState<FireRiskData | null>(null);
+  const [userLocation, setUserLocation] = useState<UserLocation | null>(null);
+  const [locationError, setLocationError] = useState<string | null>(null);
+  const [showUpdateNotification, setShowUpdateNotification] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const prevLastUpdatedRef = useRef<string | null>(null);
+  const readingsRef = useRef<HTMLDivElement>(null);
+
+  const handleModeSwitch = useCallback(
+    (next: MapViewMode) => {
+      if (next === mode || isSwitchingMode) return;
+      setIsSwitchingMode(true);
+      setMode(next);
+      setTimeout(() => setIsSwitchingMode(false), 600);
+    },
+    [mode, isSwitchingMode]
+  );
+
+  const toggleTier = useCallback((tierId: string) => {
+    setExcludedTierIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(tierId)) next.delete(tierId);
+      else next.add(tierId);
+      return next;
+    });
+  }, []);
+
+  // Clicking a cell on the map both selects it and carries the visitor down
+  // to its full reading — the one signature interaction tying the map to the
+  // scroll experience, rather than a floating panel nobody notices updated.
+  const handleCellSelect = useCallback((cell: FireRiskData | null) => {
+    setSelectedCell(cell);
+    if (cell) {
+      readingsRef.current?.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
+    }
+  }, []);
+
+  const scrollToReadings = useCallback(() => {
+    readingsRef.current?.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
+  }, []);
+
+  const activeTierIds = useMemo(
+    () => (excludedTierIds.size === 0 ? null : new Set(tiers.filter((t) => !excludedTierIds.has(t.id)).map((t) => t.id))),
+    [excludedTierIds, tiers]
+  );
+
+  const highestCells = useMemo(() => [...data].sort((a, b) => b.riskLevel - a.riskLevel).slice(0, 5), [data]);
+
+  // A single-row read of today's national distribution for the title block —
+  // the legend below carries the same breakdown per-tier with counts.
+  const distributionSegments = useMemo(() => {
+    if (data.length === 0) return [];
+    const buckets = bucketByTier(data, (d) => d.riskLevel, tiers);
+    return tiers
+      .map((tier) => ({ tierId: tier.id, color: tier.color, pct: ((buckets.get(tier.id)?.length ?? 0) / data.length) * 100 }))
+      .filter((seg) => seg.pct > 0);
+  }, [data, tiers]);
+
+  const nearestCell = useMemo(() => {
+    if (!userLocation || data.length === 0) return null;
+    let best: { cell: FireRiskData; distanceKm: number } | null = null;
+    for (const cell of data) {
+      const d = calculateDistance(userLocation.lat, userLocation.lon, cell.lat, cell.lon);
+      if (!best || d < best.distanceKm) best = { cell, distanceKm: d };
+    }
+    return best;
+  }, [userLocation, data]);
+
+  const lowDangerPct = data.length > 0 ? (data.filter((d) => d.riskLevel < 4).length / data.length) * 100 : 0;
+  const highDangerPct = data.length > 0 ? (data.filter((d) => d.riskLevel >= 8).length / data.length) * 100 : 0;
+
+  // --- Geolocation: cached (7-day TTL) -> browser geolocation -> reverse geocode. ---
+  useEffect(() => {
+    const loadCached = () => {
+      try {
+        const cached = localStorage.getItem(LOCATION_STORAGE_KEY);
+        const timestamp = localStorage.getItem(LOCATION_TIMESTAMP_KEY);
+        if (cached && timestamp && Date.now() - parseInt(timestamp, 10) < 7 * 24 * 60 * 60 * 1000) {
+          setUserLocation(JSON.parse(cached));
+          return true;
+        }
+      } catch (e) {
+        logger.warn('Failed to load cached location:', e);
+      }
+      return false;
+    };
+
+    if (loadCached()) return;
+    if (!navigator.geolocation) {
+      setLocationError('Location unavailable');
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const lat = position.coords.latitude;
+        const lon = position.coords.longitude;
+        let city = `${lat.toFixed(2)}°, ${lon.toFixed(2)}°`;
+        try {
+          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`, {
+            headers: { 'User-Agent': 'FireRiskDashboard/1.0' },
+          });
+          if (res.ok) {
+            const json = await res.json();
+            const town = json.address?.city || json.address?.town || json.address?.county;
+            const province = json.address?.state;
+            if (town) city = province ? `${town}, ${province}` : town;
+          }
+        } catch (e) {
+          logger.warn('Reverse geocoding failed, using coordinates:', e);
+        }
+        const location = { lat, lon, city };
+        setUserLocation(location);
+        setLocationError(null);
+        localStorage.setItem(LOCATION_STORAGE_KEY, JSON.stringify(location));
+        localStorage.setItem(LOCATION_TIMESTAMP_KEY, Date.now().toString());
+      },
+      () => setLocationError('Location unavailable'),
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  }, []);
+
+  // --- "Data updated" toast on refresh. ---
+  useEffect(() => {
+    if (!lastUpdated || loading) return;
+    if (prevLastUpdatedRef.current && prevLastUpdatedRef.current !== lastUpdated) {
+      setShowUpdateNotification(true);
+      const t = setTimeout(() => setShowUpdateNotification(false), 3000);
+      return () => clearTimeout(t);
+    }
+    prevLastUpdatedRef.current = lastUpdated;
+  }, [lastUpdated, loading]);
+
+  // "Updated 9:12 a.m." with no date is ambiguous once it's read past midnight
+  // and into the next day, before the day's real update has landed — it looks
+  // like this morning's update when it's actually yesterday's. Name the day
+  // explicitly whenever it isn't today.
+  const updateTimeDisplay = useMemo(() => {
+    if (!lastUpdated) return '';
+    const d = new Date(lastUpdated);
+    if (isNaN(d.getTime())) return '';
+    const time = new Intl.DateTimeFormat('en-CA', { hour: 'numeric', minute: '2-digit' }).format(d);
+    const now = new Date();
+    if (d.toDateString() === now.toDateString()) return time;
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    const day =
+      d.toDateString() === yesterday.toDateString()
+        ? 'yesterday'
+        : new Intl.DateTimeFormat('en-CA', { month: 'short', day: 'numeric' }).format(d);
+    return `${day}, ${time}`;
+  }, [lastUpdated]);
+
+  const today = useMemo(() => new Intl.DateTimeFormat('en-CA', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date()).toUpperCase(), []);
+
+  const status: 'loading' | 'error' | 'ok' = loading ? 'loading' : error ? 'error' : 'ok';
+  const statusMessage = loading
+    ? 'Loading latest data…'
+    : error
+      ? isStaleCache || data.length > 0
+        ? 'Connection issue: showing last known data'
+        : 'Unable to reach the live system'
+      : updateTimeDisplay
+        ? `Updated ${updateTimeDisplay}`
+        : 'Ready';
+
+  return (
+    <main style={{ background: 'var(--paper)' }}>
+      {showUpdateNotification && (
+        <div
+          role="status"
+          className="fixed left-1/2 top-4 z-[1200] -translate-x-1/2 px-4 py-2 font-display text-[12px] transition-all duration-300 motion-reduce:transition-none"
+          style={{ background: 'var(--accent)', color: 'var(--accent-on)' }}
+        >
+          Data updated with the latest FWI calculations
+        </div>
+      )}
+
+      {/* ===================== HERO: the map, full viewport =====================
+          Desktop/tablet (md+): one fixed h-dvh viewport, map full-bleed behind
+          an overlay panel. Mobile: there is no height this content and a full
+          hero map could both fit in, so the panel flows in normal document
+          order above a shorter map instead of overlaying it — verified against
+          a 375x667 viewport, where the overlay approach clipped the panel's
+          own footnote text under a fixed hero height. */}
+      <section className="relative w-full md:h-dvh md:overflow-hidden">
+        {/* md:z-0 (not just relative) is load-bearing at md+: without an
+            explicit z-index there, .leaflet-container never becomes its own
+            stacking context, and Leaflet's internal panes (z-index up to 700)
+            paint above the md:z-10 overlay below regardless of DOM order. On
+            mobile the map sits in normal flow, so no stacking fix is needed. */}
+        <div className="relative h-[56vh] w-full md:absolute md:inset-0 md:z-0 md:h-full">
+          <MapComponent
+            data={data}
+            tiers={tiers}
+            height="100%"
+            mode={mode}
+            activeTierIds={activeTierIds}
+            selectedCellId={selectedCell?.id ?? null}
+            onCellSelect={handleCellSelect}
+            userLocation={userLocation}
+          />
+        </div>
+
+        {/* The one consolidated panel — title, status, toggle, and the tier
+            legend/filter together, with real room to breathe. Floats over the
+            map at md+; flows below it on mobile. */}
+        <div className="w-full p-4 md:pointer-events-none md:absolute md:inset-0 md:z-10">
+          <div className="pointer-events-auto w-full md:w-[380px]" style={{ background: 'var(--paper-raised)', border: '1px solid var(--hairline)' }}>
+            <div className="px-5 pt-4">
+              <h1 className="font-display text-xl font-bold uppercase tracking-[0.03em]" style={{ color: 'var(--ink)' }}>
+                Forest Fire Risk Predictor
+              </h1>
+              <p className="mt-1 font-display text-[12px]" style={{ color: 'var(--ink-muted)' }}>
+                Canadian Forest Fire Weather Index · {today}
+              </p>
+            </div>
+            <div className="flex items-center justify-between px-5 pt-3">
+              <div className="flex items-center gap-2">
+                <StatusDot status={status} />
+                <span className="font-display text-[11px] tracking-[0.02em]" style={{ color: 'var(--ink-muted)' }}>
+                  {statusMessage}
+                </span>
+              </div>
+              <span className="font-mono tabular text-[11px]" style={{ color: 'var(--ink-muted)' }}>
+                {data.length.toLocaleString()} cells
+              </span>
+            </div>
+            {data.length > 0 && (
+              <div className="mt-3 flex h-1.5 w-full" role="img" aria-label="Today's national danger distribution">
+                {distributionSegments.map((seg) => (
+                  <span key={seg.tierId} style={{ width: `${seg.pct}%`, background: seg.color }} />
+                ))}
+              </div>
+            )}
+            <div className="px-5 py-4">
+              <ModeToggle mode={mode} onChange={handleModeSwitch} disabled={isSwitchingMode} />
+            </div>
+            {locationError && !userLocation && (
+              <div className="flex items-center gap-2 px-5 py-2.5 text-[11px]" style={{ borderTop: '1px solid var(--hairline)', color: 'var(--ink-muted)' }}>
+                <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
+                <span>Enable location to see readings near you</span>
+              </div>
+            )}
+
+            <StatisticsPanel data={data} tiers={tiers} excludedTierIds={excludedTierIds} onToggleTier={toggleTier} shouldShowSkeleton={shouldShowSkeleton} />
+          </div>
+        </div>
+
+        {/* Scroll cue: the hero's own invitation to keep going. Desktop/tablet
+            only — on mobile the panel already flows straight into the next
+            section, so the cue would just be redundant chrome. */}
+        <button
+          type="button"
+          onClick={scrollToReadings}
+          className="pointer-events-auto absolute bottom-6 left-1/2 z-10 hidden -translate-x-1/2 flex-col items-center gap-1 font-display text-[11px] font-semibold tracking-[0.12em] uppercase transition-colors md:flex"
+          style={{ color: 'var(--accent)' }}
+        >
+          Today&rsquo;s Readings
+          <ArrowDown className="scroll-cue h-4 w-4" />
+        </button>
+      </section>
+
+      {/* ===================== READINGS ===================== */}
+      <section ref={readingsRef} className="w-full" style={{ borderTop: '1px solid var(--hairline)' }}>
+        <Reveal className="mx-auto w-full max-w-4xl px-6 py-16 md:py-24">
+          {selectedCell ? (
+            <SelectedCellDetail cell={selectedCell} tiers={tiers} onClear={() => setSelectedCell(null)} />
+          ) : (
+            <HighestReadings highestCells={highestCells} nearestCell={nearestCell} tiers={tiers} shouldShowSkeleton={shouldShowSkeleton} onSelect={handleCellSelect} />
+          )}
+        </Reveal>
+      </section>
+
+      {/* ===================== NATIONAL OVERVIEW ===================== */}
+      <section className="w-full" style={{ borderTop: '1px solid var(--hairline)', background: 'var(--paper-raised)' }}>
+        <Reveal className="mx-auto w-full max-w-4xl px-6 py-16 md:py-24">
+          <SectionHeading>National Overview</SectionHeading>
+          <div className="mt-8 grid grid-cols-2 gap-6 md:grid-cols-4">
+            {[
+              { label: 'Grid Cells Monitored', value: data.length, decimals: 0 },
+              { label: 'Weather Stations', value: CANADIAN_STATIONS.length, decimals: 0 },
+              { label: 'Low Danger (FWI < 4)', value: lowDangerPct, decimals: 0, suffix: '%' },
+              { label: 'High Danger (FWI ≥ 8)', value: highDangerPct, decimals: 0, suffix: '%' },
+            ].map((tile) => (
+              <div key={tile.label}>
+                <div className="font-mono text-4xl font-bold" style={{ color: 'var(--accent)' }}>
+                  <CountUp value={tile.value} decimals={tile.decimals} suffix={tile.suffix} />
+                </div>
+                <div className="mt-1 font-display text-[12px]" style={{ color: 'var(--ink-muted)' }}>
+                  {tile.label}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Reveal>
+      </section>
+
+      {/* ===================== EMERGENCY & ABOUT ===================== */}
+      <section className="w-full" style={{ borderTop: '1px solid var(--hairline)' }}>
+        <Reveal className="mx-auto w-full max-w-4xl px-6 py-16 md:py-24">
+          <div className="flex items-center gap-3 px-4 py-3" style={{ border: '2px solid var(--ink)' }}>
+            <AlertTriangle className="h-5 w-5 flex-shrink-0" style={{ color: 'var(--ink)' }} />
+            <span className="font-display text-[14px] font-bold tracking-[0.02em]" style={{ color: 'var(--ink)' }}>
+              EMERGENCY: DIAL 911
+            </span>
+            <span className="font-display text-[13px]" style={{ color: 'var(--ink-muted)' }}>
+              for immediate fire threats
+            </span>
+          </div>
+
+          <div style={{ borderTop: '1px solid var(--hairline)' }}>
+            <button
+              type="button"
+              onClick={() => setAboutOpen((v) => !v)}
+              className="flex w-full items-center justify-between py-4 font-display text-[13px] font-semibold tracking-[0.06em] uppercase"
+              style={{ color: 'var(--ink)' }}
+              aria-expanded={aboutOpen}
+            >
+              About the Fire Weather Index
+              <ChevronDown className={`h-4 w-4 transition-transform ${aboutOpen ? 'rotate-180' : ''}`} style={{ color: 'var(--accent)' }} />
+            </button>
+            {aboutOpen && (
+              <div className="pb-6 text-[13px] leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
+                <p>
+                  The Canadian Forest Fire Weather Index (FWI1987, Van Wagner 1987) tracks fuel moisture and fire spread
+                  potential from daily weather. It is not a probability of a fire starting: it measures how a fire would
+                  behave if one did.
+                </p>
+                <ul className="mt-3 space-y-1">
+                  <li>FFMC: Fine Fuel Moisture Code</li>
+                  <li>DMC: Duff Moisture Code</li>
+                  <li>DC: Drought Code</li>
+                  <li>BUI &amp; ISI: Buildup and Spread Indices</li>
+                </ul>
+                <p className="mt-3">Recomputed daily across 7,537 grid cells from live weather data.</p>
+              </div>
+            )}
+          </div>
+        </Reveal>
+      </section>
+
+      <footer style={{ borderTop: '1px solid var(--hairline)', background: 'var(--paper-raised)' }}>
+        <div className="mx-auto w-full max-w-4xl px-6 py-8 text-center">
+          <p className="font-display text-[11px]" style={{ color: 'var(--ink-muted)' }}>
+            Data: Environment and Climate Change Canada · Natural Resources Canada
+          </p>
+        </div>
+      </footer>
+    </main>
+  );
+};
+
+const HighestReadings: React.FC<{
+  highestCells: FireRiskData[];
+  nearestCell: { cell: FireRiskData; distanceKm: number } | null;
+  tiers: ReturnType<typeof useFwiTiers>;
+  shouldShowSkeleton: boolean;
+  onSelect: (cell: FireRiskData) => void;
+}> = ({ highestCells, nearestCell, tiers, shouldShowSkeleton, onSelect }) => (
+  <div>
+    <SectionHeading>Today&rsquo;s Readings</SectionHeading>
+
+    {nearestCell && (
+      <div className="mt-8">
+        <h3 className="font-display text-[12px] font-semibold tracking-[0.1em] uppercase" style={{ color: 'var(--ink-muted)' }}>
+          Near You · {Math.round(nearestCell.distanceKm)} km away
+        </h3>
+        <Panel className="mt-2">
+          <CellRow cell={nearestCell.cell} onSelect={() => onSelect(nearestCell.cell)} tiers={tiers} />
+        </Panel>
       </div>
-    </div>
-    <div className="text-xs text-amber-800 space-y-1">
-      <p><strong className="text-amber-900">Coverage:</strong> Fire danger density across regions</p>
-      <p><strong className="text-amber-900">Color Scale:</strong> Green (FWI 0-2) to Purple (FWI 30+)</p>
+    )}
+
+    <div className="mt-8">
+      <h3 className="font-display text-[12px] font-semibold tracking-[0.1em] uppercase" style={{ color: 'var(--ink-muted)' }}>
+        Highest Today
+      </h3>
+      {shouldShowSkeleton ? (
+        <p className="mt-3 font-display text-[13px]" style={{ color: 'var(--ink-muted)' }}>
+          Loading…
+        </p>
+      ) : (
+        <Panel className="mt-2">
+          {highestCells.map((cell) => (
+            <CellRow key={cell.id} cell={cell} onSelect={() => onSelect(cell)} tiers={tiers} />
+          ))}
+        </Panel>
+      )}
     </div>
   </div>
 );
 
-const HighRiskAreas: React.FC<{ data: FireRiskData[]; shouldShowSkeleton: boolean }> = ({ data, shouldShowSkeleton }) => {
-  const recentAlerts = useMemo(() => {
-    if (!data || data.length === 0) return [];
-    
-    const stations = CANADIAN_STATIONS;
-
-    const stationGroups = new Map<string, FireRiskData[]>();
-    stations.forEach(station => stationGroups.set(station.name, []));
-    
-    data.forEach(gridCell => {
-      const lat = Number(gridCell.lat);
-      const lon = Number(gridCell.lon);
-      if (isNaN(lat) || isNaN(lon)) return;
-      
-      let nearestStation = stations[0];
-      let minDistance = calculateDistance(lat, lon, nearestStation.lat, nearestStation.lon);
-      
-      stations.forEach(station => {
-        const distance = calculateDistance(lat, lon, station.lat, station.lon);
-        if (distance < minDistance) {
-          minDistance = distance;
-          nearestStation = station;
-        }
-      });
-      
-      stationGroups.get(nearestStation.name)!.push(gridCell);
-    });
-    
-    const stationAverages = stations.map(station => {
-      const gridCells = stationGroups.get(station.name) || [];
-      const avgFWI = gridCells.length > 0 
-        ? gridCells.reduce((sum, cell) => sum + cell.riskLevel, 0) / gridCells.length 
-        : 0;
-      
-      // Round FWI to 1 decimal place
-      const roundedFWI = Math.round(avgFWI * 10) / 10;
-      
-      // Determine danger class from FWI
-      let dangerClass: string;
-      let color: string;
-      if (roundedFWI >= 30) {
-        dangerClass = 'EXTREME';
-        color = 'purple';
-      } else if (roundedFWI >= 18) {
-        dangerClass = 'V.HIGH';
-        color = 'red';
-      } else if (roundedFWI >= 8) {
-        dangerClass = 'HIGH';
-        color = 'orange';
-      } else if (roundedFWI >= 4) {
-        dangerClass = 'MOD';
-        color = 'yellow';
-      } else if (roundedFWI >= 2) {
-        dangerClass = 'LOW';
-        color = 'lightgreen';
-      } else {
-        dangerClass = 'V.LOW';
-        color = 'green';
-      }
-      
-      return {
-        id: station.name,
-        location: station.name,
-        province: station.province,
-        avgFWI: roundedFWI,
-        dangerClass: dangerClass,
-        message: `Average FWI ${roundedFWI.toFixed(1)}`,
-        color: color
-      };
-    });
-    
-    return stationAverages
-      .sort((a, b) => b.avgFWI - a.avgFWI)
-      .slice(0, 3)
-      .filter(s => s.avgFWI >= 4);  // Only show Moderate or higher
-  }, [data]);
+const SelectedCellDetail: React.FC<{ cell: FireRiskData; tiers: ReturnType<typeof useFwiTiers>; onClear: () => void }> = ({ cell, tiers, onClear }) => {
+  const tier = tierForFwi(cell.riskLevel, tiers);
+  const location = displayLocationFor(cell);
+  const fwi = cell.fireWeatherIndices;
+  const wf = cell.weatherFeatures;
+  const flags: string[] = [];
+  if (wf?.isHot) flags.push('HOT');
+  if (wf?.isDry) flags.push('DRY');
+  if (wf?.isWindy) flags.push('WINDY');
+  if (wf?.hasRecentPrecip) flags.push('RECENT PRECIP');
 
   return (
-    <div className="rounded-lg shadow-lg backdrop-blur-sm p-6 mb-6" style={{ backgroundColor: 'rgba(255, 248, 230, 0.85)', border: '1px solid rgba(218, 165, 32, 0.3)' }}>
-      <div className="flex items-center mb-4">
-        <AlertTriangle className="w-5 h-5 mr-2 text-orange-700" />
-        <h3 className="text-lg font-semibold text-amber-900">High Danger Areas</h3>
+    <div>
+      <button
+        type="button"
+        onClick={onClear}
+        className="flex items-center gap-1.5 font-display text-[12px] font-semibold tracking-[0.06em] uppercase"
+        style={{ color: 'var(--accent)' }}
+      >
+        <X className="h-3.5 w-3.5" /> All Readings
+      </button>
+
+      <div className="mt-4 flex flex-wrap items-baseline justify-between gap-4">
+        <SectionHeading>
+          {location.city}, {location.province}
+        </SectionHeading>
+        <div className="flex items-center gap-3">
+          <span aria-hidden="true" className="h-5 w-5 flex-shrink-0" style={{ background: tier.color, border: '1px solid rgba(21,23,15,0.25)' }} />
+          <span className="font-mono tabular text-4xl font-bold" style={{ color: 'var(--ink)' }}>
+            {cell.riskLevel.toFixed(1)}
+          </span>
+          <span className="font-display text-[14px]" style={{ color: 'var(--ink-muted)' }}>
+            {tier.name} · FWI {formatTierRange(tier)}
+          </span>
+        </div>
       </div>
-      <div className="space-y-3">
-        {shouldShowSkeleton ? <div className="text-center text-amber-700 py-4">Loading...</div> : 
-        recentAlerts.length > 0 ? recentAlerts.map(alert => (
-          <div key={alert.id} className={`flex items-start space-x-3 p-3 rounded-lg border-l-4 shadow-sm ${
-            alert.color === 'purple' ? 'bg-purple-50 border-purple-500' :
-            alert.color === 'red' ? 'bg-red-50 border-red-500' : 
-            alert.color === 'orange' ? 'bg-orange-50 border-orange-500' : 
-            alert.color === 'yellow' ? 'bg-yellow-50 border-yellow-500' : 
-            alert.color === 'lightgreen' ? 'bg-green-50 border-green-400' :
-            'bg-green-50 border-green-500'}`}>
-            <div className={`font-bold text-xs ${
-              alert.color === 'purple' ? 'text-purple-600' :
-              alert.color === 'red' ? 'text-red-600' : 
-              alert.color === 'orange' ? 'text-orange-600' : 
-              alert.color === 'yellow' ? 'text-yellow-600' : 
-              alert.color === 'lightgreen' ? 'text-green-500' :
-              'text-green-600'}`}>{alert.dangerClass}</div>
-            <div>
-              <div className="text-sm font-medium text-gray-900">{alert.location}</div>
-              <div className="text-xs text-gray-700">{alert.province}</div>
-              <div className="text-xs text-gray-700">{alert.message}</div>
+
+      <div className="mt-10 grid grid-cols-1 gap-10 md:grid-cols-2">
+        {/* Conditions leads and reads larger — what a visitor actually feels
+            outside — while the FWI components are reference detail below. */}
+        {wf && (
+          <div>
+            <h3 className="font-display text-[13px] font-semibold tracking-[0.06em] uppercase" style={{ color: 'var(--ink)' }}>
+              Conditions
+            </h3>
+            <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-4">
+              {(
+                [
+                  [`${wf.temperature.toFixed(1)}°C`, 'Temperature'],
+                  [`${wf.humidity.toFixed(0)}%`, 'Humidity'],
+                  [`${wf.windSpeed.toFixed(1)} km/h`, 'Wind'],
+                  [`${wf.precip24h.toFixed(1)} mm`, 'Precip / 24h'],
+                ] as const
+              ).map(([value, label]) => (
+                <div key={label}>
+                  <dd className="font-mono tabular text-2xl font-semibold" style={{ color: 'var(--ink)' }}>
+                    {value}
+                  </dd>
+                  <dt className="font-display text-[11px]" style={{ color: 'var(--ink-muted)' }}>
+                    {label}
+                  </dt>
+                </div>
+              ))}
             </div>
+            {flags.length > 0 && (
+              <div className="mt-4 flex flex-wrap gap-2">
+                {flags.map((flag) => (
+                  <span key={flag} className="font-display text-[10px] font-semibold tracking-[0.08em] px-2 py-1" style={{ border: '1px solid var(--accent)', color: 'var(--accent)' }}>
+                    {flag}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
-        )) : (
-          <div className="flex items-start space-x-3 p-3 bg-green-50 rounded-lg border-l-4 border-green-500 shadow-sm">
-            <div className="text-green-600 font-bold text-xs">V.LOW</div>
-            <div><div className="text-sm font-medium text-gray-900">All Areas</div><div className="text-xs text-gray-700">No high danger areas detected</div></div>
+        )}
+
+        {fwi && (
+          <div>
+            <h3 className="font-display text-[11px] font-semibold tracking-[0.1em] uppercase" style={{ color: 'var(--ink-muted)' }}>
+              Fire Weather Indices
+            </h3>
+            <dl className="mt-3 grid grid-cols-3 gap-x-4 gap-y-3">
+              {(
+                [
+                  ['FFMC', fwi.ffmc],
+                  ['DMC', fwi.dmc],
+                  ['DC', fwi.dc],
+                  ['ISI', fwi.isi],
+                  ['BUI', fwi.bui],
+                  ['DSR', fwi.dsr],
+                ] as const
+              ).map(([label, value]) => (
+                <div key={label}>
+                  <dt className="font-display text-[9px] tracking-[0.08em] uppercase" style={{ color: 'var(--ink-muted)' }}>
+                    {label}
+                  </dt>
+                  <dd className="font-mono tabular text-[15px]" style={{ color: 'var(--ink-muted)' }}>
+                    {value.toFixed(1)}
+                  </dd>
+                </div>
+              ))}
+            </dl>
           </div>
         )}
       </div>
     </div>
-  );
-};
-
-const FireRiskDashboard: React.FC = () => {
-  const { data, loading, error, lastUpdated, modelInfo } = useFireRiskData();
-  const shouldShowSkeleton = loading && (!data || data.length === 0);
-  const [showUpdateNotification, setShowUpdateNotification] = useState(false);
-  const prevLastUpdatedRef = useRef<string | null>(null);
-
-  const LOCATION_STORAGE_KEY = 'userLocation';
-  const LOCATION_TIMESTAMP_KEY = 'userLocationTimestamp';
-
-  const [userLocation, setUserLocation] = useState<{ lat: number; lon: number; city?: string } | null>(null);
-  const [locationError, setLocationError] = useState<string | null>(null);
-  const [locationEnabled, setLocationEnabled] = useState(true);
-  const [mapMode, setMapMode] = useState<'markers' | 'heatmap'>('markers');
-  const [stationCount, setStationCount] = useState<number>(0);
-  const [pendingMode, setPendingMode] = useState<'markers' | 'heatmap' | null>(null);
-
-  const [nearestStations, setNearestStations] = useState<Array<{ station: FireRiskData; distance: number }>>([]);
-  const locationRequestedRef = useRef(false);
-  const hasSetLocationRef = useRef(false);
-
-  const displayData = useMemo(() => {
-   return data && data.length > 0 ? data : [];
-  }, [data]);
-  
-  const [isSwitchingMode, setIsSwitchingMode] = useState(false);
-
-  const handleModeSwitch = (mode: 'markers' | 'heatmap') => {
-  if (mode === mapMode || isSwitchingMode) return;
-    setIsSwitchingMode(true);
-    setMapMode(mode);
-    setPendingMode(mode);
-    setTimeout(() => {
-      setPendingMode(null);
-      setIsSwitchingMode(false);
-    }, 2000); 
-  };
-
- useEffect(() => {
-  const loadCachedLocation = () => {
-    try {
-      const cached = localStorage.getItem(LOCATION_STORAGE_KEY);
-      const timestamp = localStorage.getItem(LOCATION_TIMESTAMP_KEY);
-      
-      if (cached && timestamp) {
-        const age = Date.now() - parseInt(timestamp);
-        if (age < 7 * 24 * 60 * 60 * 1000) {
-          const loc = JSON.parse(cached);
-          if (loc.city && loc.city !== 'Your Location') {
-            setUserLocation(loc);
-            logger.info('Using cached location:', loc.city);
-            return true;
-          }
-        }
-      }
-    } catch (e) {
-      logger.warn('Failed to load cached location:', e);
-    }
-    return false;
-  };
-
-  if (loadCachedLocation()) {
-    return;
-  }
-
-  if (!navigator.geolocation) {
-    setLocationError('Geolocation not supported');
-    setLocationEnabled(false);
-    return;
-  }
-
-  logger.info('Requesting fresh location...');
-
-  navigator.geolocation.getCurrentPosition(
-    async (position) => {
-      const userLat = position.coords.latitude;
-      const userLon = position.coords.longitude;
-      
-      logger.info(`Location: ${userLat}, ${userLon}`);
-      
-      try {
-        const response = await fetch(
-          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${userLat}&lon=${userLon}`,
-          { headers: { 'User-Agent': 'FireRiskDashboard/1.0' } }
-        );
-        
-        if (!response.ok) throw new Error('Geocoding failed');
-        
-        const data = await response.json();
-        const city = data.address?.city || data.address?.town || data.address?.county || 'Unknown';
-        const province = data.address?.state || '';
-        const displayName = province ? `${city}, ${province}` : city;
-        
-        const location = { lat: userLat, lon: userLon, city: displayName };
-        
-        setUserLocation(location);
-        setLocationError(null);
-        setLocationEnabled(true);
-        
-        localStorage.setItem(LOCATION_STORAGE_KEY, JSON.stringify(location));
-        localStorage.setItem(LOCATION_TIMESTAMP_KEY, Date.now().toString());
-        
-        logger.info(`Location set: ${displayName}`);
-      } catch (err) {
-        logger.warn('Geocoding failed, using coordinates:', err);
-        
-        const location = { 
-          lat: userLat, 
-          lon: userLon, 
-          city: `${userLat.toFixed(2)}°, ${userLon.toFixed(2)}°` 
-        };
-        
-        setUserLocation(location);
-        localStorage.setItem(LOCATION_STORAGE_KEY, JSON.stringify(location));
-        localStorage.setItem(LOCATION_TIMESTAMP_KEY, Date.now().toString());
-      }
-    },
-    (error) => {
-      logger.error('Geolocation error:', error);
-      setLocationError('Location unavailable');
-      setLocationEnabled(false);
-    },
-    {
-      enableHighAccuracy: true,
-      timeout: 10000,
-      maximumAge: 0 
-    }
-  );
- }, []);  
-
- useEffect(() => {
-  if (displayData && displayData.length > 0 && userLocation) {
-    const stationsWithDistance = displayData.map(gridCell => ({
-      station: gridCell,
-      distance: calculateDistance(userLocation.lat, userLocation.lon, gridCell.lat, gridCell.lon)
-    }));
-    const nearest = stationsWithDistance
-      .sort((a, b) => a.distance - b.distance)
-      .slice(0, 2);
-    
-    setNearestStations(nearest);
-  } else {
-    setNearestStations([]); 
-  }
- }, [displayData, userLocation]);
-
- const formatUpdateTime = (lastUpdatedTime: string | null): string => {
-  if (!lastUpdatedTime) return '';
-  
-  try {
-    const updated = new Date(lastUpdatedTime);
-    
-    if (isNaN(updated.getTime())) return '';
-    
-    const hours = updated.getHours();
-    const minutes = updated.getMinutes();
-    const ampm = hours >= 12 ? 'PM' : 'AM';
-    const displayHours = hours % 12 || 12;
-    const displayMinutes = minutes.toString().padStart(2, '0');
-    
-    return `${displayHours}:${displayMinutes} ${ampm}`;
-  } catch {
-    return '';
-  }
-};
-
- const [updateTimeDisplay, setUpdateTimeDisplay] = useState<string>(() => formatUpdateTime(lastUpdated));
-
- useEffect(() => {
-  setUpdateTimeDisplay(formatUpdateTime(lastUpdated));
-}, [lastUpdated]);
-
- const getUpdateStatus = () => {
-  if (loading) {
-    return { status: 'loading', message: 'Loading latest data...' };
-  }
-  
-  if (error) {
-    return { status: 'error', message: 'Connection issue' };
-  }
-  
-  if (!lastUpdated || !updateTimeDisplay) {
-    return { status: 'updated', message: 'Ready' };
-  }
-  
-  return {
-    status: 'updated',
-    message: `Last updated: ${updateTimeDisplay}`
-  };
-};
-
-useEffect(() => {
-  if (!lastUpdated || loading) {
-    return;
-  }
-
-  if (prevLastUpdatedRef.current && prevLastUpdatedRef.current !== lastUpdated) {
-    logger.info(prevLastUpdatedRef.current, lastUpdated);
-    setShowUpdateNotification(true);
-    setTimeout(() => setShowUpdateNotification(false), 3000);
-  }
-
-  prevLastUpdatedRef.current = lastUpdated;
-}, [lastUpdated, loading]);
-
-const updateStatus = getUpdateStatus();
-
-  return (
-    <main className="min-h-screen" style={{ background: theme.gradients.pageBackground }}>
-      {showUpdateNotification && (
-      <div 
-        className="fixed top-24 right-4 z-50 bg-green-600 text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-2 animate-slide-in"
-        style={{ 
-          animation: 'slideIn 0.3s ease-out',
-          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.06)'
-        }}
-      >
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-        <span className="font-medium">Data updated with latest FWI calculations</span>
-      </div>
-    )}
-      <style jsx global>{`
-        @keyframes slideIn {
-          from {
-            transform: translateX(400px);
-            opacity: 0;
-          }
-          to {
-            transform: translateX(0);
-            opacity: 1;
-          }
-        }
-        .sidebar-scroll::-webkit-scrollbar {
-          width: 8px;
-        }
-        .sidebar-scroll::-webkit-scrollbar-track {
-          background: rgba(218, 165, 32, 0.1);
-          border-radius: 10px;
-        }
-        .sidebar-scroll::-webkit-scrollbar-thumb {
-          background: rgba(218, 165, 32, 0.5);
-          border-radius: 10px;
-        }
-        .sidebar-scroll::-webkit-scrollbar-thumb:hover {
-          background: rgba(218, 165, 32, 0.7);
-        }
-      `}</style>
-
-      {/* Header Section */}
-      <header className="shadow-md backdrop-blur-sm" style={theme.styles.header}>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
-          <div className="grid grid-cols-1 sm:grid-cols-3 items-center gap-4">
-            {/* Left Icon */}
-            <div className="hidden sm:flex items-center justify-start">
-              <img 
-                src="/favicon.ico" 
-                alt="Forest Fire Predictor"
-                className="w-12 h-12 sm:w-16 sm:h-16 lg:w-20 lg:h-20"
-                style={{ filter: 'drop-shadow(0 2px 4px rgba(139, 69, 19, 0.2))' }}
-              />
-            </div>
-            {/* Center Text */}
-            <div className="text-center justify-self-center">
-              <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold tracking-tight whitespace-nowrap leading-tight mb-2" 
-                  style={theme.styles.title}>
-                Forest Fire Risk Predictor
-              </h1>
-              <p className="text-sm sm:text-base md:text-lg font-medium" 
-                
-                style={theme.styles.subtitle}>
-                Daily fire danger monitoring using the Canadian Fire Weather Index
-              </p>
-            </div>
-            {/* Right Icon */}
-            <div className="hidden sm:flex items-center justify-end">
-              <img 
-                src="/favicon.ico" 
-                alt="Forest Fire Predictor"
-                className="w-12 h-12 sm:w-16 sm:h-16 lg:w-20 lg:h-20"
-                style={{ filter: 'drop-shadow(0 2px 4px rgba(139, 69, 19, 0.2))' }}
-              />
-            </div>
-          </div>
-        </div>
-      </header>
-            
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-          <div className="lg:col-span-3 space-y-6">
-            <div className="rounded-lg shadow-lg backdrop-blur-sm p-6 mb-6" style={theme.styles.panel}>
-              <div className="mb-4">
-                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between mb-3 gap-3">
-                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
-                    <h2 className="text-lg sm:text-xl font-semibold text-amber-900">Canada Fire Danger Map</h2>
-                  <div className="flex items-center space-x-2">
-                    {updateTimeDisplay && (
-                      <div 
-                        className={`w-2.5 h-2.5 rounded-full shadow-sm ${
-                          updateStatus.status === 'loading' ? 'bg-yellow-500 animate-pulse' : 
-                          updateStatus.status === 'error' ? 'bg-red-500' : 
-                          'bg-green-500'
-                        }`}
-                        role="status"
-                        aria-label={`Data status: ${updateStatus.message}`}
-                      />
-                    )}
-                    <div className="flex flex-col">
-                      <span className="text-xs text-amber-800 font-medium">
-                        {updateStatus.message}
-                      </span>
-                      {!loading && lastUpdated && (
-                        <span className="text-xs text-amber-600 italic">
-                          FWI: Daily at noon • Weather: Hourly
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  </div>
-                  <div className="flex items-center rounded-lg p-1" style={theme.styles.mapControlsBg}>
-                    <button 
-                    onClick={() => handleModeSwitch('markers')}
-                    aria-label="Switch to marker view"
-                    aria-pressed={mapMode === 'markers'}
-                    className={`flex items-center px-2 sm:px-3 py-2 rounded-md text-xs sm:text-sm font-medium transition-all ${mapMode === 'markers' || pendingMode === 'markers' ? 'bg-white text-blue-700 shadow-md' : 'text-amber-800 hover:text-amber-900'}`}
-                  >
-                    <MapPin className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
-                    <span>Markers</span>
-                  </button>
-
-                  <button 
-                    onClick={() => handleModeSwitch('heatmap')}
-                    disabled={isSwitchingMode}
-                    aria-label="Switch to heatmap view"
-                    aria-pressed={mapMode === 'heatmap'}
-                    className={`flex items-center px-2 sm:px-3 py-2 rounded-md text-xs sm:text-sm font-medium transition-all ${
-                      mapMode === 'heatmap' || pendingMode === 'heatmap' 
-                        ? 'bg-white text-orange-700 shadow-md' 
-                        : 'text-amber-800 hover:text-amber-900'
-                    } ${isSwitchingMode ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    <Layers className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
-                    <span>{isSwitchingMode && pendingMode === 'heatmap' ? 'Loading...' : 'Heatmap'}</span>
-                  </button>
-                  </div>
-                </div>
-                <p className="text-amber-800 text-sm">
-                  {mapMode === 'markers' ? 'Click markers to view FWI values and danger classifications.' : 'Heat zones show fire danger intensity across Canadian regions.'}
-                </p>
-              </div>
-             <MapComponent 
-                key={`map-${lastUpdated || 'initial'}`} 
-                height="600px" 
-                className="border-2 border-amber-300 rounded-lg shadow-md" 
-                data={displayData || []} 
-                mapMode={mapMode} 
-                onStationCountUpdate={setStationCount} 
-                userLocation={userLocation} 
-              />
-            </div>
-
-            <div className="rounded-lg shadow-lg backdrop-blur-sm p-6" style={{ backgroundColor: 'rgba(255, 248, 230, 0.85)', border: '1px solid rgba(218, 165, 32, 0.3)' }}>
-              <h3 className="text-lg font-semibold text-amber-900 mb-4">National FWI Overview</h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="text-center p-4 rounded-lg shadow-sm" style={{ backgroundColor: 'rgba(255, 255, 255, 0.6)' }}>
-                  <div className="text-2xl font-bold text-amber-900">{displayData ? displayData.length.toLocaleString() : '0'}</div>
-                  <div className="text-xs text-amber-800 mt-1">Grid Cells Monitored</div>
-                </div>
-                <div className="text-center p-4 bg-blue-50 rounded-lg shadow-sm border border-blue-200">
-                  <div className="text-2xl font-bold text-blue-600">{stationCount}</div>
-                  <div className="text-xs text-blue-800 mt-1">Weather Stations</div>
-                </div>
-                <div className="text-center p-4 bg-green-50 rounded-lg shadow-sm border border-green-200">
-                  <div className="text-2xl font-bold text-green-600">{displayData ? Math.round((displayData.filter(d => d.riskLevel < 4).length / displayData.length) * 100) : 0}%</div>
-                  <div className="text-xs text-green-800 mt-1">Low Danger (FWI &lt;4)</div>
-                </div>
-                <div className="text-center p-4 bg-orange-50 rounded-lg shadow-sm border border-orange-200">
-                  <div className="text-2xl font-bold text-orange-600">{displayData ? Math.round((displayData.filter(d => d.riskLevel >= 8).length / displayData.length) * 100) : 0}%</div>
-                  <div className="text-xs text-orange-800 mt-1">High Danger (FWI ≥8)</div>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-lg shadow-lg backdrop-blur-sm p-5" style={{ backgroundColor: 'rgba(255, 248, 230, 0.85)', border: '1px solid rgba(218, 165, 32, 0.3)' }}>
-              <h3 className="text-lg font-semibold text-amber-900 mb-3 flex items-center">
-                <ExternalLink className="w-5 h-5 mr-2 text-orange-700" />
-                Official Resources & Updates
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <a href="https://cwfis.cfs.nrcan.gc.ca/home" target="_blank" rel="noopener noreferrer"
-                   className="group flex items-start p-3 bg-gradient-to-br from-red-50 to-orange-50 rounded-xl hover:shadow-lg transition-all duration-200 border border-red-200 hover:border-red-300">
-                  <div className="flex-shrink-0 w-11 h-11 bg-white rounded-lg flex items-center justify-center shadow-sm group-hover:shadow-md transition-shadow mr-3">
-                    <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.879 16.121A3 3 0 1012.015 11L11 14H9c0 .768.293 1.536.879 2.121z" />
-                    </svg>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-semibold text-gray-900 text-sm mb-1 group-hover:text-red-700 transition-colors">Canadian Wildland Fire Info</div>
-                    <div className="text-xs text-gray-700 leading-relaxed">National fire maps, forecasts & satellite data</div>
-                  </div>
-                  <ExternalLink className="w-4 h-4 text-gray-400 group-hover:text-red-600 transition-colors flex-shrink-0 ml-2 mt-1" />
-                </a>
-
-                <a href="https://natural-resources.canada.ca/forest-forestry/wildland-fires/wildland-fires" target="_blank" rel="noopener noreferrer"
-                   className="group flex items-start p-3 bg-gradient-to-br from-orange-50 to-amber-50 rounded-xl hover:shadow-lg transition-all duration-200 border border-orange-200 hover:border-orange-300">
-                  <div className="flex-shrink-0 w-11 h-11 bg-white rounded-lg flex items-center justify-center shadow-sm group-hover:shadow-md transition-shadow mr-3">
-                    <svg className="w-6 h-6 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                    </svg>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-semibold text-gray-900 text-sm mb-1 group-hover:text-orange-700 transition-colors">Natural Resources Canada</div>
-                    <div className="text-xs text-gray-700 leading-relaxed">Wildfire research & national coordination</div>
-                  </div>
-                  <ExternalLink className="w-4 h-4 text-gray-400 group-hover:text-orange-600 transition-colors flex-shrink-0 ml-2 mt-1" />
-                </a>
-
-                <a href="https://www.canada.ca/en/health-canada/services/publications/healthy-living/how-prepare-wildfire-smoke.html" target="_blank" rel="noopener noreferrer"
-                   className="group flex items-start p-3 bg-gradient-to-br from-yellow-50 to-amber-50 rounded-xl hover:shadow-lg transition-all duration-200 border border-yellow-200 hover:border-yellow-300">
-                  <div className="flex-shrink-0 w-11 h-11 bg-white rounded-lg flex items-center justify-center shadow-sm group-hover:shadow-md transition-shadow mr-3">
-                    <svg className="w-6 h-6 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
-                    </svg>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-semibold text-gray-900 text-sm mb-1 group-hover:text-amber-700 transition-colors">Government of Canada</div>
-                    <div className="text-xs text-gray-700 leading-relaxed">National wildfire weather & safety info</div>
-                  </div>
-                  <ExternalLink className="w-4 h-4 text-gray-400 group-hover:text-amber-600 transition-colors flex-shrink-0 ml-2 mt-1" />
-                </a>
-
-                <a href="https://www.canada.ca/en/public-safety-canada/campaigns/wildfires/prov.html" target="_blank" rel="noopener noreferrer"
-                   className="group flex items-start p-3 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl hover:shadow-lg transition-all duration-200 border border-blue-200 hover:border-blue-300">
-                  <div className="flex-shrink-0 w-11 h-11 bg-white rounded-lg flex items-center justify-center shadow-sm group-hover:shadow-md transition-shadow mr-3">
-                    <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-                    </svg>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-semibold text-gray-900 text-sm mb-1 group-hover:text-blue-700 transition-colors">Provincial Wildfire Resources</div>
-                    <div className="text-xs text-gray-700 leading-relaxed">Regional fire updates & local emergency info</div>
-                  </div>
-                  <ExternalLink className="w-4 h-4 text-gray-400 group-hover:text-blue-600 transition-colors flex-shrink-0 ml-2 mt-1" />
-                </a>
-              </div>
-
-              <div className="mt-4 pt-3 border-t border-amber-300 flex items-center justify-center">
-                <div className="flex items-center space-x-2 text-sm bg-red-50 px-4 py-2 rounded-lg border border-red-300 shadow-sm">
-                  <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 15.284 3 7V6z" />
-                  </svg>
-                  <span className="font-semibold text-red-900">Emergency: Dial 911</span>
-                  <span className="text-gray-700">for immediate fire threats</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="lg:col-span-1 sidebar-scroll" style={theme.styles.sidebarScroll}>
-            <div className="space-y-6">
-            {userLocation && nearestStations.length > 0 && (
-            <div className="rounded-lg shadow-lg backdrop-blur-sm p-6 mb-6" style={{ backgroundColor: 'rgba(255, 248, 230, 0.85)', border: '1px solid rgba(218, 165, 32, 0.3)' }}>
-              <div className="flex items-center mb-4">
-                <MapPin className="w-5 h-5 mr-2 text-orange-700" />
-                <h3 className="text-lg font-semibold text-amber-900">Nearest Stations</h3>
-              </div>
-              <div className="mb-3 pb-3 border-b border-amber-200">
-                <div className="text-sm text-amber-800">
-                  <div className="font-medium flex items-center">
-                    <span className="mr-1">📍</span>
-                    {userLocation.city && userLocation.city !== 'Your Location' ? (
-                      <span>{userLocation.city}</span>
-                    ) : (
-                      <span className="italic text-amber-600">Locating...</span>
-                    )}
-                  </div>
-                  {userLocation.city === 'Your Location' && (
-                    <div className="text-xs text-amber-600 mt-1">
-                      {userLocation.lat.toFixed(2)}°N, {Math.abs(userLocation.lon).toFixed(2)}°W
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="space-y-3">
-                {nearestStations.map((item, index) => {
-                  const fwi = item.station.riskLevel;
-                  const riskColor = getRiskColor(fwi);
-                  const dangerClass = getRiskLabel(fwi);
-                  return (
-                    <div key={index} className="p-3 rounded-lg shadow-sm" style={{ backgroundColor: 'rgba(255, 255, 255, 0.7)' }}>
-                      <div className="flex justify-between items-start mb-2">
-                        <div className="font-medium text-sm text-amber-900">{item.station.location}</div>
-                        <div className="text-xs text-orange-700 font-semibold">{Math.round(item.distance)} km</div>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div className="text-xs text-amber-800">{item.station.province}</div>
-                        <div 
-                          className="text-xs px-2 py-1 rounded flex items-center gap-1" 
-                          style={{ 
-                            backgroundColor: riskColor + '20',
-                            color: riskColor,
-                            fontWeight: 600
-                          }}
-                          role="status"
-                          aria-label={`Fire danger: ${dangerClass}, FWI ${fwi.toFixed(1)}`}
-                        >
-                          <span 
-                            className="w-2 h-2 rounded-full" 
-                            style={{ backgroundColor: riskColor }}
-                            aria-hidden="true"
-                          />
-                          FWI {fwi.toFixed(1)} - {dangerClass}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-           )}
-            {locationError && !userLocation && (
-              <div className="rounded-lg shadow-lg backdrop-blur-sm p-4 mb-6" style={{ backgroundColor: 'rgba(254, 243, 199, 0.9)', border: '1px solid rgba(245, 158, 11, 0.3)' }}>
-                <div className="flex items-center text-sm text-amber-800">
-                  <AlertTriangle className="w-4 h-4 mr-2 flex-shrink-0" />
-                  <span>Enable location to see nearest stations</span>
-                </div>
-              </div>
-            )}
-            <StatisticsPanel data={displayData || []} modelInfo={modelInfo} shouldShowSkeleton={shouldShowSkeleton} userLocation={userLocation} />
-            {mapMode === 'heatmap' ? <HeatmapLegend /> : <Legend />}
-            <HighRiskAreas data={displayData || []} shouldShowSkeleton={shouldShowSkeleton} />
-            <div className="rounded-lg shadow-lg backdrop-blur-sm p-6" style={{ backgroundColor: 'rgba(255, 248, 230, 0.85)', border: '1px solid rgba(218, 165, 32, 0.3)' }}>
-              <h3 className="text-lg font-semibold text-amber-900 mb-4">About the System</h3>
-              <div className="text-sm text-amber-800 space-y-3">
-                <p className="font-medium text-amber-900">Canadian Fire Weather Index</p>
-                <p className="text-xs leading-relaxed">Official algorithm from Environment and Climate Change Canada using 45-day historical weather accumulation to calculate fire danger indices.</p>
-                <div className="pt-3 border-t border-amber-200">
-                  <p className="font-medium mb-2 text-amber-900">Key Components:</p>
-                  <ul className="space-y-1 text-xs">
-                    <li className="flex items-start"><span className="text-orange-600 mr-2">•</span><span>Fine Fuel Moisture Code (FFMC)</span></li>
-                    <li className="flex items-start"><span className="text-orange-600 mr-2">•</span><span>Duff Moisture Code (DMC)</span></li>
-                    <li className="flex items-start"><span className="text-orange-600 mr-2">•</span><span>Drought Code (DC)</span></li>
-                    <li className="flex items-start"><span className="text-orange-600 mr-2">•</span><span>Buildup & Spread Indices</span></li>
-                  </ul>
-                </div>
-                <div className="text-xs pt-3 border-t border-amber-200 space-y-1">
-                  <div className="flex justify-between">
-                    <span className="text-amber-800">Grid Locations:</span>
-                    <span className="font-medium text-amber-900">{displayData?.length || 0}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-amber-800">Weather Stations:</span>
-                    <span className="font-medium text-amber-900">{stationCount}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-amber-800">Update Schedule:</span>
-                    <span className="font-medium text-amber-900">Daily at noon</span>
-                  </div>
-                </div>
-                <div className="text-xs pt-3 border-t border-amber-200 bg-blue-50 p-3 rounded">
-                  <p className="font-semibold text-blue-900 mb-1">What is FWI?</p>
-                  <p className="text-blue-800 leading-relaxed">The Fire Weather Index measures fire behavior potential (spread rate and intensity) if a fire starts. </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-     </div>
-
-      <footer className="shadow-inner mt-16" style={{ backgroundColor: 'rgba(139, 69, 19, 0.9)' }}>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="text-center">
-            <p className="text-sm text-amber-100">
-              © 2026 Canadian Fire Weather Index Dashboard
-            </p>
-            <p className="text-xs text-amber-200 mt-2">
-              Data: Environment and Climate Change Canada • Natural Resources Canada
-            </p>
-          </div>
-        </div>
-      </footer>
-    </main>
   );
 };
 

@@ -1,21 +1,23 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Archivo, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import 'leaflet/dist/leaflet.css';
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const archivo = Archivo({
+  variable: "--font-archivo",
   subsets: ["latin"],
+  display: "swap",
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const jetbrainsMono = JetBrains_Mono({
+  variable: "--font-jetbrains-mono",
   subsets: ["latin"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
   title: 'Forest Fire Risk Predictor | Canada',
-  description: 'Real-time fire danger monitoring across Canada using the Canadian Fire Weather Index System. Updated hourly with live predictions for 14,952 locations.',
+  description: 'Daily wildfire danger monitoring across Canada using the Canadian Forest Fire Weather Index, computed for 7,537 grid cells from live weather data.',
   keywords: 'fire risk, Canada, wildfire, fire weather index, FWI, forest fire, fire danger, fire prediction, Canada fire map',
   authors: [{ name: 'Taimoor Kiani' }],
   robots: {
@@ -49,7 +51,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${archivo.variable} ${jetbrainsMono.variable} antialiased`}
       >
         {children}
       </body>
