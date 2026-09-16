@@ -1,91 +1,101 @@
-# Forest Fire Risk Predictor
+# Forest Fire Risk Predictor - Frontend
 
-> **Real-time wildfire risk monitoring across Canada using the Canadian Fire Weather Index System**
+> **A live map of Canadian wildfire danger, built on the Canadian Fire Weather Index (FWI1987) System**
 
-An interactive web application that provides hourly fire risk predictions for over 15,000 locations nationwide, helping Canadians stay informed about wildfire dangers in their area.
+A Next.js application that renders the country's real fire-danger grid as a single thematic map plate — every one of 7,537 grid cells individually colored, hoverable, and clickable — followed by a scrolling report on today's highest readings, national overview, and official emergency information.
+
+**Live:** [forestfirepredictor.com](https://forestfirepredictor.com) · **API:** [forest-fire-predictor-api.onrender.com](https://forest-fire-predictor-api.onrender.com)
 
 ---
 
 ## Overview
 
-The Forest Fire Risk Predictor is a production-ready Next.js application that visualizes fire risk data on an interactive map, powered by Environment Canada's official Fire Weather Index algorithm.
+The official **Canadian Forest Fire Weather Index (FWI1987)** system is the one classification this app ever shows the public: six fixed danger tiers (Very Low through Extreme), read live from the backend rather than hardcoded, so a future change to the tier system is a data update, not a rewrite. A newer ML model is being validated by the backend in shadow mode (see the [backend README](https://github.com/taimoor789/Forest-Fire-Predictor/blob/main/README.md)) — its fields exist on the API but are intentionally never surfaced here; whether it's ever promoted to primary is a separate decision.
 
-### **Key Statistics**
-- 🗺️ **15,000+** grid cells monitored across Canada
-- 🌡️ **38** weather stations providing real-time data
-- ⏱️ **Hourly** automatic updates
-- 📍 **30-day** historical weather accumulation
-- 🎯 **95%** model confidence
+### **Key Capabilities**
+- 🗺️ **7,537 grid cells**, individually rendered on a canvas map layer — not an averaged or sampled subset
+- 🎯 **Every cell interactive**: hover for a quick reading, click for its full Fire Weather Index breakdown
+- 📡 **38 named weather stations** as an aggregated secondary view, colored and filterable the same way
+- 🔍 **Tap a danger class to isolate it** on the map, in either view
+- 📍 **Smart geolocation** — cached 7 days, falls back gracefully without it
+- ⚠️ **Honest failure**: if the live API is unreachable, the app says so rather than falling back to invented data
 
 ---
 
 ## Features
 
-###  **Interactive Map Visualization**
+### **The Map**
 
-#### **Markers Mode**
-- 38 weather stations with aggregated risk data
-- Color-coded markers (green → red) based on fire danger
-- Click markers for detailed station information:
-  - Temperature, humidity, wind speed
-  - Fire Weather Index values (FFMC, DMC, DC, ISI, BUI, FWI)
-  - Danger class and risk percentage
+- **Grid mode** (default): all 7,537 cells as flat color fields on a single canvas layer, styled after a mid-century thematic atlas plate. Hovering shows a quick FWI readout; clicking opens the cell's full detail below and scrolls you to it.
+- **Stations mode**: the same data aggregated to 38 named cities, as a lighter-weight overview.
+- **Danger-class legend**, collapsible to a compact swatch strip so it doesn't cover the map — expand it for per-class counts, FWI ranges, and distribution bars. Tapping a class dims everything else, on the map and in the station markers alike.
 
-#### **Heatmap Mode**
-- 15,000+ grid cells showing fire risk density
-- Smooth gradient visualization (green → yellow → red)
-- Regional risk patterns at a glance
+### **Today's Readings**
 
-###  **Risk Dashboard**
+- Selected cell or station: city, province, FWI value and tier, then **Conditions** (temperature, humidity, wind, 24h precipitation) ahead of the full **Fire Weather Indices** breakdown (FFMC, DMC, DC, ISI, BUI, DSR) — conditions first, since that's what a visitor actually feels outside.
+- With nothing selected: today's five highest readings nationwide, plus the reading nearest the visitor (distance in km), so the page always has something to show even on a calm day.
 
-#### **Statistics Panel**
-- **Very High** (≥80%) - Extreme fire danger
-- **High** (60-80%) - High fire risk
-- **Medium** (40-60%) - Moderate risk
-- **Low** (<40%) - Minimal risk
+### **National Overview**
 
-#### **High Risk Alerts**
-- Top 3 highest-risk areas displayed
-- Real-time risk percentages
-- Provincial location information
+Grid cells monitored, weather station count, and the national low-danger / high-danger split, as animated counters.
 
-#### **National Overview**
-- Total grid cells monitored
-- Active weather stations count
-- Percentage breakdowns by risk level
+### **Emergency & About**
 
-###  **Smart Geolocation**
-
-#### **Auto-Detection**
-- Automatic location detection (with user permission)
-- 7-day location caching (no repeated requests)
-- Fallback to coordinates if geocoding fails
-
-#### **Nearest Stations**
-- Shows 2 closest weather stations
-- Distance in kilometers
-- Current risk level for each station
-
-###  **Official Resources**
-Direct links to:
-- Canadian Wildland Fire Information System
-- Natural Resources Canada
-- Government of Canada wildfire resources
-- Provincial fire agencies
+A 911 emergency callout, and a collapsible explainer of what FWI actually measures and its component codes.
 
 ---
 
-##  Tech Stack
+## Danger Classes
 
-| Category | Technology | Purpose |
-|----------|-----------|---------|
-| **Framework** | Next.js 15 | React framework with SSR |
-| **Language** | TypeScript | Type safety and developer experience |
-| **Mapping** | Leaflet | Interactive map visualization |
-| **Styling** | Tailwind CSS | Utility-first CSS framework |
-| **State Management** | React Hooks | Local state management |
-| **API Integration** | Fetch API | Backend communication |
-| **Testing** | Jest | Unit and integration testing |
+The same official FWI1987 boundaries the backend computes against (`GET /api/danger-classes` is this frontend's source of truth — the six tiers below are its fallback, not a second hardcoded copy):
+
+| FWI Range | Class | Color |
+|-----------|-------|-------|
+| 0-2 | Very Low | 🟢 Green |
+| 2-4 | Low | 🟡 Yellow-Green |
+| 4-8 | Moderate | 🟡 Yellow |
+| 8-18 | High | 🟠 Orange |
+| 18-30 | Very High | 🔴 Red |
+| 30+ | Extreme | 🟣 Purple |
+
+---
+
+## Tech Stack
+
+| Component | Technology | Purpose |
+|-----------|-----------|---------|
+| **Framework** | Next.js 15 (App Router) + React 19 | Client-rendered app, single route |
+| **Language** | TypeScript | Type safety end to end |
+| **Styling** | Tailwind CSS 4 | CSS-first design tokens (`app/globals.css`) |
+| **Mapping** | Leaflet (vanilla) | Custom canvas field renderer for the 7,537-cell grid, not a marker-per-cell approach |
+| **Basemap** | Esri World Light Gray Canvas (base + reference labels) | Free, no API key; labels render above the color field |
+| **Fonts** | Archivo (display), JetBrains Mono (tabular data) | Self-hosted via `next/font` |
+| **Testing** | Jest + Testing Library | Unit tests for FWI/geo utilities and API parsing |
+
+---
+
+## Data Flow
+
+- Fetches `GET /api/predict/fire-risk` and `GET /api/danger-classes` from the live backend, client-side, with no server-side caching (`cache: 'no-store'`) — every load gets current data.
+- A local cache in `localStorage` gives an instant first paint on repeat visits, refreshed hourly with a 60-second poll for new data in between.
+- ML shadow-mode fields (`ml_danger_class`, `ml_risk_probability`) are dropped at the API-parsing boundary and never reach a component — see `app/lib/api.ts`.
+- On a connection failure, the app shows its actual state (stale cached data with a notice, or an explicit "unable to reach the live system" message) rather than silently substituting fabricated numbers.
+
+---
+
+## Development
+
+```bash
+npm install
+npm run dev
+```
+
+`NEXT_PUBLIC_API_URL` (see `.env.local`) points at the backend to use — either a locally running copy of the [backend](https://github.com/taimoor789/Forest-Fire-Predictor) on `localhost:8000`, or the live API directly for frontend-only work.
+
+```bash
+npm test        # unit tests
+npm run build   # production build
+```
 
 ---
 
@@ -104,16 +114,15 @@ Direct links to:
 
 ## Acknowledgments
 
-- **Environment and Climate Change Canada** - Fire Weather Index algorithm
-- **Natural Resources Canada** - Wildfire data and research
-- **OpenWeather API** - Real-time weather data
-- **OpenStreetMap Nominatim** - Geocoding services
+- **Van Wagner, C.E.** and the **Canadian Forest Service** — FWI System
+- **Natural Resources Canada** and **Environment and Climate Change Canada** — fire weather data and research
+- **Esri** — basemap tiles
+- **OpenStreetMap Nominatim** — geocoding
+- **Leaflet** — mapping engine
 
 ---
 
 <div align="center">
-
-**Made with ❤️ for Canadian communities**
 
 ![Fire Risk](https://img.shields.io/badge/Fire%20Risk-Monitoring-orange?style=for-the-badge)
 ![Status](https://img.shields.io/badge/Status-Production-success?style=for-the-badge)
