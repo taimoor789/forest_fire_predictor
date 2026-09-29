@@ -151,7 +151,7 @@ const Reveal: React.FC<{ children: React.ReactNode; className?: string }> = ({ c
 };
 
 const CellRow: React.FC<{ cell: FireRiskData; onSelect: () => void; tiers: ReturnType<typeof useFwiTiers> }> = ({ cell, onSelect, tiers }) => {
-  const tier = tierForFwi(cell.riskLevel, tiers);
+  const tier = tierForFwi(cell.riskProbability, tiers);
   const location = displayLocationFor(cell);
   return (
     <button
@@ -168,7 +168,7 @@ const CellRow: React.FC<{ cell: FireRiskData; onSelect: () => void; tiers: Retur
         {tier.name}
       </span>
       <span className="font-mono tabular text-[14px] font-semibold" style={{ color: 'var(--ink)' }}>
-        {cell.riskLevel.toFixed(1)}
+        {(cell.riskProbability * 100).toFixed(3)}%
       </span>
     </button>
   );
@@ -230,13 +230,13 @@ const FireRiskDashboard: React.FC = () => {
     [excludedTierIds, tiers]
   );
 
-  const highestCells = useMemo(() => [...data].sort((a, b) => b.riskLevel - a.riskLevel).slice(0, 5), [data]);
+  const highestCells = useMemo(() => [...data].sort((a, b) => b.riskProbability - a.riskProbability).slice(0, 5), [data]);
 
   // A single-row read of today's national distribution for the title block —
   // the legend below carries the same breakdown per-tier with counts.
   const distributionSegments = useMemo(() => {
     if (data.length === 0) return [];
-    const buckets = bucketByTier(data, (d) => d.riskLevel, tiers);
+    const buckets = bucketByTier(data, (d) => d.riskProbability, tiers);
     return tiers
       .map((tier) => ({ tierId: tier.id, color: tier.color, pct: ((buckets.get(tier.id)?.length ?? 0) / data.length) * 100 }))
       .filter((seg) => seg.pct > 0);
@@ -578,7 +578,7 @@ const HighestReadings: React.FC<{
 );
 
 const SelectedCellDetail: React.FC<{ cell: FireRiskData; tiers: ReturnType<typeof useFwiTiers>; onClear: () => void }> = ({ cell, tiers, onClear }) => {
-  const tier = tierForFwi(cell.riskLevel, tiers);
+  const tier = tierForFwi(cell.riskProbability, tiers);
   const location = displayLocationFor(cell);
   const fwi = cell.fireWeatherIndices;
   const wf = cell.weatherFeatures;
@@ -606,10 +606,10 @@ const SelectedCellDetail: React.FC<{ cell: FireRiskData; tiers: ReturnType<typeo
         <div className="flex items-center gap-3">
           <span aria-hidden="true" className="h-5 w-5 flex-shrink-0" style={{ background: tier.color, border: '1px solid rgba(21,23,15,0.25)' }} />
           <span className="font-mono tabular text-4xl font-bold" style={{ color: 'var(--ink)' }}>
-            {cell.riskLevel.toFixed(1)}
+            {(cell.riskProbability * 100).toFixed(3)}%
           </span>
           <span className="font-display text-[14px]" style={{ color: 'var(--ink-muted)' }}>
-            {tier.name} · FWI {formatTierRange(tier)}
+            {tier.name} · {formatTierRange(tier)}
           </span>
         </div>
       </div>

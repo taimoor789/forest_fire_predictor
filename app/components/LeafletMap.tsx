@@ -90,6 +90,9 @@ function createStationAggregates(data: FireRiskData[]): FireRiskData[] {
       location: station.name,
       province: station.province,
       riskLevel: Math.round(avg((c) => c.riskLevel, 0) * 10) / 10,
+      // riskProbability is tiny (typically < 0.02) -- rounding at 1 decimal
+      // place like riskLevel above would flatten every station to 0.0.
+      riskProbability: Math.round(avg((c) => c.riskProbability, 0) * 1e6) / 1e6,
       temperature: Math.round(avg((c) => c.temperature, 15) * 10) / 10,
       humidity: Math.round(avg((c) => c.humidity, 60) * 10) / 10,
       windSpeed: Math.round(avg((c) => c.windSpeed, 10) * 10) / 10,
@@ -296,7 +299,7 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
       const lon = Number(cell.lon);
       if (isNaN(lat) || isNaN(lon)) return;
 
-      const tier = tierForFwi(cell.riskLevel, tiersRef.current);
+      const tier = tierForFwi(cell.riskProbability, tiersRef.current);
       const bounds: L.LatLngBoundsExpression = [
         [lat - HALF_STEP, lon - HALF_STEP],
         [lat + HALF_STEP, lon + HALF_STEP],
@@ -463,7 +466,7 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
 
     const aggregates = createStationAggregates(data);
     const markers = aggregates.map((station) => {
-      const tier = tierForFwi(station.riskLevel, tiersRef.current);
+      const tier = tierForFwi(station.riskProbability, tiersRef.current);
       // Same tier filter as the grid field (targetOpacityFor), so isolating a
       // class from the legend dims non-matching stations too, not just cells.
       const isActive = activeTierIds === null || activeTierIds.has(tier.id);
@@ -481,7 +484,7 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
           <div class="text-[13px] font-semibold" style="color:${PLATE_INK}">${station.location}, ${station.province}</div>
           <div class="mt-1.5 flex items-center gap-1.5 text-xs" style="color:${PLATE_INK}">
             <span style="display:inline-block;width:9px;height:9px;background:${tier.color};border:1px solid ${PLATE_INK}22"></span>
-            <span>FWI ${station.riskLevel.toFixed(1)}: ${tier.name}</span>
+            <span>${tier.name} (${(station.riskProbability * 100).toFixed(3)}%) · FWI ${station.riskLevel.toFixed(1)}</span>
           </div>
           <div class="mt-2 pt-2 text-[11px] tabular" style="border-top:1px solid ${PLATE_INK}22;color:${PLATE_INK}99">
             <div>Temperature: ${station.temperature?.toFixed(1)}°C</div>
@@ -547,7 +550,7 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
     userMarkerRef.current = marker;
   }, [ready, userLocation]);
 
-  const tooltipTier = hoveredCell ? tierForFwi(hoveredCell.riskLevel, tiers) : null;
+  const tooltipTier = hoveredCell ? tierForFwi(hoveredCell.riskProbability, tiers) : null;
 
   return (
     <div style={{ height, width: '100%', position: 'relative' }} className="overflow-hidden">
@@ -572,8 +575,8 @@ const LeafletMap: React.FC<LeafletMapProps> = ({
             willChange: 'transform',
           }}
         >
-          <span className="tabular font-semibold">FWI {hoveredCell.riskLevel.toFixed(1)}</span>
-          <span style={{ color: 'var(--ink-muted)' }}>: {tooltipTier.name}</span>
+          <span className="tabular font-semibold">{tooltipTier.name}</span>
+          <span style={{ color: 'var(--ink-muted)' }}>: {(hoveredCell.riskProbability * 100).toFixed(3)}% · FWI {hoveredCell.riskLevel.toFixed(1)}</span>
         </div>
       )}
     </div>

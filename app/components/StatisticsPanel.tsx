@@ -15,12 +15,12 @@ interface StatisticsPanelProps {
 
 /**
  * The tier key, the day's distribution, and the tier filter, in one place —
- * clicking a swatch isolates that tier on the map. The six tiers are never
+ * clicking a swatch isolates that tier on the map. Tiers are never
  * hardcoded here; they come from the registry (app/lib/fwi/tiers.ts), which
  * is itself seeded from /api/danger-classes.
  *
  * Collapsed by default to a single compact swatch row: the full panel sits
- * over the map, and a 6-row breakdown was covering a good stretch of western
+ * over the map, and a full breakdown was covering a good stretch of western
  * Canada. Expand for counts, ranges, and the per-tier distribution bars.
  *
  * Content only — no outer frame. It's meant to be embedded directly under
@@ -28,7 +28,7 @@ interface StatisticsPanelProps {
  */
 const StatisticsPanel: React.FC<StatisticsPanelProps> = ({ data, tiers, excludedTierIds, onToggleTier, shouldShowSkeleton }) => {
   const [expanded, setExpanded] = useState(false);
-  const buckets = useMemo(() => bucketByTier(data, (d) => d.riskLevel, tiers), [data, tiers]);
+  const buckets = useMemo(() => bucketByTier(data, (d) => d.riskProbability, tiers), [data, tiers]);
   const total = data.length;
   const anyExcluded = excludedTierIds.size > 0;
   const orderedTiers = useMemo(() => [...tiers].reverse(), [tiers]);
@@ -94,7 +94,7 @@ const StatisticsPanel: React.FC<StatisticsPanelProps> = ({ data, tiers, excluded
             })}
           </div>
           <p className="px-5 py-3 text-[11px] leading-relaxed" style={{ color: 'var(--ink-muted)', borderTop: '1px solid var(--hairline)' }}>
-            FWI measures fire behaviour potential: how it would spread if a fire started. Tap a class to isolate it on the map.
+            Machine-learned probability of a fire starting nearby, calibrated against historical fire records. Tap a class to isolate it on the map.
           </p>
         </>
       ) : (

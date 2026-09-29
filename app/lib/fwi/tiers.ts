@@ -1,12 +1,19 @@
 /**
- * The Canadian Forest Fire Weather Index danger-class registry.
+ * The active fire-danger tier registry.
  *
- * This is the single place the six official danger tiers are defined. Every
- * other part of the app — the map field, the legend, the distribution
- * summary, the tier filter — reads from here rather than hardcoding the
- * classification. If the tier system ever changes (a boundary moves, a tier
- * is renamed, the count changes), that is a data change in this file (or,
- * live, in the API's own /api/danger-classes), never a UI rewrite.
+ * This is the single place the tiers are defined. Every other part of the
+ * app — the map field, the legend, the distribution summary, the tier
+ * filter — reads from here rather than hardcoding the classification. If
+ * the tier system ever changes (a boundary moves, a tier is renamed, the
+ * count changes), that is a data change in this file (or, live, in the
+ * API's own /api/danger-classes), never a UI rewrite.
+ *
+ * Tiers are classified against riskProbability (the ML model's calibrated
+ * probability, 0-1) since the 2026-09-28 promotion decision — see
+ * docs/PREREGISTRATION.md in the backend repo. Despite the field names
+ * below (min/max, "Fwi" in helper names), tiers are no longer bucketed by
+ * the raw FWI number; tierForFwi/bucketByTier are generic over whatever
+ * numeric value a caller passes in.
  *
  * FALLBACK_TIERS mirrors what GET /api/danger-classes returns today and is
  * used until that endpoint has been reached at least once, and afterwards
@@ -18,7 +25,7 @@ export interface FwiTier {
   /** Stable slug, e.g. "very-low". Derived from the tier name. */
   id: string;
   name: string;
-  /** Inclusive lower bound of this tier's FWI range. */
+  /** Inclusive lower bound of this tier's range. */
   min: number;
   /** Exclusive upper bound; the top tier's is Infinity. */
   max: number;
@@ -26,13 +33,13 @@ export interface FwiTier {
   description: string;
 }
 
+// Mirrors model_components/tiers.json (backend repo) as of the 2026-09-28
+// promotion. Bounds are calibrated probabilities, not FWI values.
 export const FALLBACK_TIERS: FwiTier[] = [
-  { id: 'very-low', name: 'Very Low', min: 0, max: 2, color: '#4CAF50', description: 'Fires start easily but spread slowly' },
-  { id: 'low', name: 'Low', min: 2, max: 4, color: '#8BC34A', description: 'Fires start easily and spread at low to moderate rates' },
-  { id: 'moderate', name: 'Moderate', min: 4, max: 8, color: '#FFEB3B', description: 'Fires start easily and spread at moderate rates' },
-  { id: 'high', name: 'High', min: 8, max: 18, color: '#FF9800', description: 'Fires start easily and spread at high rates' },
-  { id: 'very-high', name: 'Very High', min: 18, max: 30, color: '#F44336', description: 'Fires start very easily and spread at very high rates' },
-  { id: 'extreme', name: 'Extreme', min: 30, max: Infinity, color: '#9C27B0', description: 'Fires start very easily and spread at extreme rates' },
+  { id: 'very-low', name: 'Very Low', min: 0, max: 0.0000742, color: '#4CAF50', description: 'Current conditions and fire history indicate a very low chance of a fire starting nearby' },
+  { id: 'low', name: 'Low', min: 0.0000742, max: 0.0008383, color: '#8BC34A', description: 'Current conditions and fire history indicate a low chance of a fire starting nearby' },
+  { id: 'moderate', name: 'Moderate', min: 0.0008383, max: 0.0105609, color: '#FFEB3B', description: 'Current conditions and fire history indicate a moderate chance of a fire starting nearby' },
+  { id: 'high', name: 'High', min: 0.0105609, max: Infinity, color: '#FF9800', description: 'Current conditions and fire history indicate an elevated chance of a fire starting nearby' },
 ];
 
 function slugify(name: string): string {
@@ -126,6 +133,12 @@ export function bucketByTier<T>(
   return buckets;
 }
 
+/** Probability-scale bounds (the normal case since 2026-09-28) format as a
+ * percentage; anything >= 1 is treated as a plain-number scale (e.g. a
+ * possible future reversion to FWI's own 0-30ish range) and left as-is. */
 export function formatTierRange(tier: FwiTier): string {
-  return tier.max === Infinity ? `${tier.min}+` : `${tier.min}–${tier.max}`;
+  const referenceValue = tier.max === Infinity ? tier.min : tier.max;
+  const isProbabilityScale = referenceValue < 1;
+  const fmt = (n: number) => (isProbabilityScale ? `${(n * 100).toFixed(3)}%` : `${n}`);
+  return tier.max === Infinity ? `${fmt(tier.min)}+` : `${fmt(tier.min)}–${fmt(tier.max)}`;
 }

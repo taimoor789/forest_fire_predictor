@@ -13,8 +13,10 @@ const CACHE_TIMESTAMP_KEY = 'fireRiskDataCacheTimestamp';
 const CACHE_SIZE_LIMIT = 6 * 1024 * 1024;
 
 // Shape of GET /api/predict/fire-risk. ml_danger_class / ml_risk_probability
-// exist on the wire (shadow-mode fields) but are intentionally never read
-// into FireRiskData below — see PRODUCT.md.
+// are the ML model's own fields, kept on the wire for comparison/audit but
+// not read here. serving_risk_probability is the one that matters: it's
+// whichever system is primary right now (ML since 2026-09-28, with FWI as
+// the backend's own fail-safe fallback) — see docs/PREREGISTRATION.md.
 export interface FWIPredictionResponse {
   success: boolean;
   data: Array<{
@@ -25,6 +27,9 @@ export interface FWIPredictionResponse {
     fwi: number;
     danger_class: string;
     color_code: string;
+    serving_risk_probability?: number | null;
+    serving_danger_class?: string;
+    serving_color_code?: string;
     weather_features: {
       temperature: number;
       humidity: number;
@@ -168,12 +173,18 @@ export class FireRiskAPI {
         }
 
         const wf = item.weather_features;
+        // Null only in the backend's rare ML-unavailable fail-safe path
+        // (see fire_risk.py) -- 0 lands in the lowest tier, a safe default
+        // rather than an alarming one for a failure mode that isn't
+        // supposed to happen in normal operation.
+        const riskProbability = typeof item.serving_risk_probability === 'number' ? item.serving_risk_probability : 0;
 
         transformedData.push({
           id: `fwi_${lat}_${lon}`,
           lat,
           lon,
           riskLevel: fwi,
+          riskProbability,
           location: item.location_name.trim(),
           province: item.province.trim(),
           temperature: wf?.temperature,
