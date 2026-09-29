@@ -101,7 +101,7 @@ const StatisticsPanel: React.FC<StatisticsPanelProps> = ({ data, tiers, excluded
             })}
           </div>
           <p className="px-5 py-3 text-[11px] leading-relaxed" style={{ color: 'var(--ink-muted)', borderTop: '1px solid var(--hairline)' }}>
-            Machine-learned probability of a fire starting nearby, calibrated against historical fire records. Tiers rank cells relative to each other today, not absolute likelihood — High means highest-risk right now, not a high chance of a fire. Cross-checked daily against the Canadian Forest Fire Weather Index, still tracked for every cell. Tap a class to isolate it on the map.
+            Machine-learned probability of a fire starting nearby, calibrated against historical fire records. Tiers rank cells relative to each other: High means highest-risk right now, not a high chance of a fire. Cross-checked daily against the Canadian FWI. Tap a class to isolate it on the map.
           </p>
         </>
       ) : (
