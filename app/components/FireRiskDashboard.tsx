@@ -398,7 +398,7 @@ const FireRiskDashboard: React.FC = () => {
                 Forest Fire Risk Predictor
               </h1>
               <p className="mt-1 font-display text-[12px]" style={{ color: 'var(--ink-muted)' }}>
-                Canadian Forest Fire Weather Index · {today}
+                Machine-Learned Fire Risk · Canadian FWI Tracked · {today}
               </p>
             </div>
             <div className="flex items-center justify-between px-5 pt-3">

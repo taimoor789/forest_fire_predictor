@@ -39,13 +39,20 @@ const StatisticsPanel: React.FC<StatisticsPanelProps> = ({ data, tiers, excluded
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
-          className="flex items-center gap-2"
+          className="-ml-2 flex items-center gap-1.5 rounded-sm py-1 pl-2 pr-2.5 transition-colors hover:[background:var(--accent-soft)]"
           aria-expanded={expanded}
+          aria-label={expanded ? 'Collapse fire danger class legend' : 'Expand fire danger class legend'}
         >
           <h2 className="font-display text-[11px] font-semibold tracking-[0.14em] uppercase" style={{ color: 'var(--ink)' }}>
             Fire Danger Class
           </h2>
-          <ChevronDown className="h-3.5 w-3.5 transition-transform" style={{ color: 'var(--accent)', transform: expanded ? 'rotate(180deg)' : undefined }} />
+          <span
+            aria-hidden="true"
+            className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full transition-transform"
+            style={{ background: 'var(--accent-soft)', transform: expanded ? 'rotate(180deg)' : undefined }}
+          >
+            <ChevronDown className="h-3 w-3" style={{ color: 'var(--accent)' }} />
+          </span>
         </button>
         {anyExcluded && expanded && (
           <button
@@ -94,7 +101,7 @@ const StatisticsPanel: React.FC<StatisticsPanelProps> = ({ data, tiers, excluded
             })}
           </div>
           <p className="px-5 py-3 text-[11px] leading-relaxed" style={{ color: 'var(--ink-muted)', borderTop: '1px solid var(--hairline)' }}>
-            Machine-learned probability of a fire starting nearby, calibrated against historical fire records. Tap a class to isolate it on the map.
+            Machine-learned probability of a fire starting nearby, calibrated against historical fire records — cross-checked daily against the Canadian Forest Fire Weather Index, still tracked for every cell. Tap a class to isolate it on the map.
           </p>
         </>
       ) : (
